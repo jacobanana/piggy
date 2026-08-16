@@ -9,7 +9,7 @@ import { setState } from './context';
 import { enterBooks } from './books';
 import { markBusy, paintGate } from './gate';
 import { toast } from './modals';
-import { rememberBook, session } from './session';
+import { session } from './session';
 import { ApiError, requestCode, signOut, verifyCode } from '../storage/api';
 import { blankState } from '../model/state';
 import { $, esc } from '../lib/utils';
@@ -103,7 +103,9 @@ export function doSignOut(): void {
   signOut();
   session.user = null;
   session.book = null;
-  rememberBook(null);
+  // Which piggy bank was open is kept on purpose, under this account's own
+  // key: signing out and back in used to drop you into the oldest book you
+  // belong to, which for anyone who joined a shared one is the wrong bank.
   A.step = 'email';
   A.verificationId = '';
   setState(blankState());

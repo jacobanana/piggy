@@ -23,6 +23,7 @@ from core.logging import configure_logging
 from core.utils import utcnow
 from database.connection import engine
 from identity.models import EmailVerification, User, UserRole
+from ledger.models import Book, BookMember, Expense, Ledger
 
 ROLE_CHOICES = [role.value for role in UserRole]
 
@@ -122,6 +123,43 @@ def cmd_logout(args: argparse.Namespace) -> None:
         session.add(user)
         session.commit()
         print(f"Signed out everywhere: {_describe(user)}")
+
+
+def cmd_banks(args: argparse.Namespace) -> None:
+    """Every piggy bank, who is in it, and what it holds.
+
+    The question this answers: somebody's expenses never showed up for anyone
+    else — did they land in a book of their own instead of the shared one? An
+    account that belongs to two books, one of them with a single member and
+    the newest entries in it, is that fault written out.
+    """
+    with Session(engine) as session:
+        books = list(session.exec(select(Book).order_by(col(Book.created_at))).all())
+        if args.email:
+            user = _find(session, args.email.strip().lower())
+            mine = {m.book_id for m in session.exec(select(BookMember).where(BookMember.user_id == user.id)).all()}
+            books = [b for b in books if b.id in mine]
+
+        for book in books:
+            members = session.exec(select(BookMember).where(BookMember.book_id == book.id)).all()
+            ledgers = session.exec(select(Ledger).where(Ledger.book_id == book.id)).all()
+            ledger_ids = [ledger.id for ledger in ledgers]
+            expenses = (
+                list(session.exec(select(Expense).where(col(Expense.ledger_id).in_(ledger_ids))).all())
+                if ledger_ids
+                else []
+            )
+            newest = max((e.created_at for e in expenses), default=None)
+            print(f"{book.name}  [{book.id}]  v{book.version}")
+            for member in sorted(members, key=lambda m: m.role.value):
+                who = session.get(User, member.user_id)
+                print(f"    {member.role.value:6} {who.email if who else member.user_id}")
+            print(
+                f"    {len(ledgers)} list(s), {len(expenses)} expense(s)"
+                + (f", newest {newest:%Y-%m-%d %H:%M}" if newest else "")
+            )
+
+        print(f"\n{len(books)} piggy bank(s)")
 
 
 def cmd_login_code(args: argparse.Namespace) -> None:
@@ -231,6 +269,10 @@ def build_parser() -> argparse.ArgumentParser:
     logout_parser = subparsers.add_parser("logout", help="Sign a user out everywhere")
     logout_parser.add_argument("--email", required=True)
     logout_parser.set_defaults(func=cmd_logout)
+
+    banks_parser = subparsers.add_parser("banks", help="List piggy banks, their members and what they hold")
+    banks_parser.add_argument("--email", help="Only the banks this account belongs to")
+    banks_parser.set_defaults(func=cmd_banks)
 
     code_parser = subparsers.add_parser("login-code", help="Show the pending sign-in code for an address")
     code_parser.add_argument("--email", required=True)

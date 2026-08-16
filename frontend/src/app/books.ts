@@ -54,8 +54,15 @@ export async function enterBooks(): Promise<void> {
     }
     const books = await listBooks();
     const wanted = lastBook();
-    const book = books.find((b) => b.id === wanted) || books[0] || (await createBook('Piggy'));
-    await openBook(book);
+    const remembered = books.find((b) => b.id === wanted);
+    if (remembered) { await openBook(remembered); return; }
+    // Nothing remembered and more than one to choose from: ask. Guessing here
+    // is the worst kind of wrong — every book is called Piggy until it is
+    // renamed, so landing in the private one looks exactly like landing in the
+    // shared one, and everything typed into it is invisible to the people you
+    // share with.
+    if (books.length > 1) { showBankGate(books); return; }
+    await openBook(books[0] || (await createBook('Piggy')));
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) { signedOut(); return; }
     gateError("Can't reach the server 📡", message(err), 'books-retry');
@@ -87,6 +94,31 @@ export async function openBook(book: BookSummary): Promise<void> {
 }
 
 export function retryBooks(): void { void enterBooks(); }
+
+/**
+ * Full-screen because no book is open yet — the same shape as the join gate.
+ * `book-open` is the switcher's own action, so picking one here goes down
+ * exactly the path that remembers it.
+ */
+function showBankGate(books: BookSummary[]): void {
+  const rows = books.map((b) => {
+    const who = b.members === 1 ? 'just you' : b.members + ' people';
+    return '<button type="button" class="item" style="width:100%;text-align:left" ' +
+      'data-act="book-open" data-id="' + b.id + '">' +
+      '<div class="emo">' + (b.members > 1 ? '👥' : '🏦') + '</div>' +
+      '<div class="item-main"><div class="name">' + esc(b.name) + '</div>' +
+      '<div class="meta"><span>' + who + '</span>' +
+      (b.role === 'owner' ? '<span>·</span><span>you own it</span>' : '') + '</div></div>' +
+      '<span class="sub">open</span></button>';
+  }).join('');
+
+  paintGate(`
+    <div class="card" style="margin-top:20px">
+      <h2 style="font-size:22px">Which piggy bank? 🐷</h2>
+      <p class="sub" style="margin:8px 0 18px;line-height:1.5">You're in more than one. Pick the one you want — this device will remember it.</p>
+      <div class="list">${rows}</div>
+    </div>`);
+}
 
 /* ---------- joining by invite ---------- */
 
@@ -165,7 +197,8 @@ export async function switchTo(bookId: string): Promise<void> {
   closeModal();
   const books = await listBooks().catch(() => [] as BookSummary[]);
   const book = books.find((b) => b.id === bookId);
-  if (book) await openBook(book);
+  if (book) { await openBook(book); return; }
+  toast("Couldn't open that piggy bank — try again");
 }
 
 export async function newBank(): Promise<void> {
