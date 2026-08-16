@@ -50,6 +50,15 @@ input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
 .icon-btn:hover{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
 .ledger-bar{display:flex;gap:8px;overflow-x:auto;padding:10px 16px 12px;max-width:760px;margin:0 auto;scrollbar-width:none}
 .ledger-bar::-webkit-scrollbar{display:none}
+/* the sign-in gate: no book on screen, so the chrome has nothing to act on */
+body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none}
+/* a fixed red: --accent is the theme colour and reads as decoration, not alarm */
+.auth-error{font-size:13px;font-weight:800;color:#D9455F;margin-top:10px;line-height:1.45}
+/* on a shared deployment the book name doubles as the book switcher */
+.brand.tappable{cursor:pointer;border-radius:10px;padding:2px 8px 2px 4px;margin-left:-4px}
+.brand.tappable:active{background:var(--tint)}
+.brand .caret{font-size:13px;color:var(--ink-soft);margin-left:2px}
+.chip:disabled{opacity:.45;cursor:default}
 .pill{white-space:nowrap;border:2px solid var(--ink);background:var(--card);border-radius:999px;padding:7px 14px;font-weight:700;font-size:14px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:transform .12s ease}
 .pill:hover{transform:translateY(-1px)}
 .pill.on{background:var(--ink);color:#fff}
@@ -128,6 +137,7 @@ input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
 .btn{border:2px solid var(--ink);background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;font-size:14px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);transition:transform .1s ease, box-shadow .1s ease}
 .btn:hover{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
 .btn:active{transform:translate(2px,2px);box-shadow:0 0 0 var(--ink)}
+.btn:disabled{opacity:.6;cursor:default;transform:none}
 .btn.primary{background:var(--accent);color:#fff}
 .btn.mint{background:var(--mint);color:#fff}
 .btn.soft{box-shadow:none;border-color:var(--line);font-weight:700}

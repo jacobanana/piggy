@@ -48,6 +48,7 @@ ignore = ["B008"]  # FastAPI Depends() in defaults
 [tool.ruff.lint.per-file-ignores]
 # The wire format mirrors the frontend's camelCase JSON on purpose.
 "src/ledger/schemas.py" = ["N815"]
+"src/ledger/api.py" = ["N815"]
 # `date` fields shadow the type name inside the class body; the alias is the fix.
 "src/ledger/models.py" = ["N812"]
 "tests/*" = ["E501"]

@@ -2,6 +2,7 @@
 import type { Expense, Ledger, LedgerItem, MonthKey, Person, Settlement } from '../model/types';
 import { S, UI, account, activeLedger, baseCur, person, save, accountEmoji, accountLabel, toBase } from './context';
 import { COLORS } from './theme';
+import { onServer } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, cents, dayLabel, esc, fromCents, money, monthLabel, monthOf, thisMonth } from '../lib/utils';
 import { computeBalances, categoryTotals, paidByTotals, settlementsInScope, simplifyDebts } from '../domain/balances';
@@ -17,12 +18,26 @@ export function whoChip(p: Person | undefined, cls?: string): string {
   return p ? '<span class="who">' + avatar(p, cls) + esc(p.name) + '</span>' : '';
 }
 
+/**
+ * The brand is the book's name, and on a shared deployment it is also how you
+ * get between books — there is nowhere else that is always on screen.
+ */
+function renderBrand(): void {
+  const brand = $('#brandName');
+  if (brand) brand.textContent = S.meta.appName || 'Piggy';
+  const box = $('.brand');
+  if (!box || !onServer()) return;
+  box.dataset.act = 'banks';
+  box.classList.add('tappable');
+  if (!box.querySelector('.caret')) box.insertAdjacentHTML('beforeend', '<span class="caret">▾</span>');
+}
+
 export function render(): void {
+  renderBrand();
   if (!S.people.length) { renderOnboarding(); return; }
   const l = activeLedger();
   if (!l) { renderNoLedger(); return; }
   UI.ledgerId = l.id;
-  const brand = $('#brandName'); if (brand) brand.textContent = S.meta.appName || 'Piggy';
   renderLedgerBar();
   const main = $('#main'); if (main) main.innerHTML = l.kind === 'trip' ? tripView(l) : householdView(l);
   const fab = $('#fab'); if (fab) fab.style.display = 'flex';
@@ -36,22 +51,32 @@ function renderLedgerBar(): void {
   if (el) el.innerHTML = bar + '<button class="pill ghost" data-act="new-ledger">＋ New list</button>';
 }
 
-function renderOnboarding(): void {
+/** How many name boxes the onboarding form is showing. Grows on demand. */
+let obSlots = 2;
+export function addOnboardSlot(): void { obSlots += 1; renderOnboarding(); }
+
+export function renderOnboarding(): void {
   const lb = $('#ledgerBar'); if (lb) lb.innerHTML = '';
   const fab = $('#fab'); if (fab) fab.style.display = 'none';
   const main = $('#main'); if (!main) return;
+  const kept = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]')).map((el) => el.value);
+  const hints = ['e.g. Léa', 'e.g. Marc', 'e.g. Sam', 'e.g. Robin'];
+  const boxes = Array.from({ length: obSlots }, (_, i) =>
+    '<div class="field"><label>' + (i === 0 ? 'Your name' : 'Person ' + (i + 1)) + '</label>' +
+    '<input class="input" data-ob="' + i + '" value="' + esc(kept[i] || '') + '" placeholder="' +
+    esc(hints[i] || 'Another name') + '" autocomplete="off"></div>').join('');
+
   main.innerHTML = `
   <div class="card" style="margin-top:20px">
-    <h2 style="font-size:22px">Hello you two 👋</h2>
-    <p class="sub" style="margin:8px 0 18px;line-height:1.5">Piggy keeps your shared spending tidy: recurring bills, everyday extras, and holidays — with a running tally of who owes whom.</p>
-    <div class="two">
-      <div class="field"><label>First name</label><input class="input" id="ob1" placeholder="e.g. Léa" autocomplete="off"></div>
-      <div class="field"><label>Second name</label><input class="input" id="ob2" placeholder="e.g. Marc" autocomplete="off"></div>
-    </div>
+    <h2 style="font-size:22px">Hello you lot 👋</h2>
+    <p class="sub" style="margin:8px 0 18px;line-height:1.5">Piggy keeps shared spending tidy: recurring bills, everyday extras, and holidays — with a running tally of who owes whom.</p>
+    <div class="${obSlots === 2 ? 'two' : ''}">${boxes}</div>
+    <button class="btn soft wide" style="margin-bottom:13px" data-act="ob-more">＋ Add another person</button>
     <div class="field"><label>Main currency</label>
       <select class="input" id="obCur">${['CHF', 'EUR', 'USD', 'GBP'].map((c) => '<option ' + (c === 'CHF' ? 'selected' : '') + '>' + c + '</option>').join('')}</select>
     </div>
     <button class="btn primary wide" data-act="ob-go">Start our piggy bank 🐷</button>
+    <div class="hint">You can add or remove people later under Settings.</div>
   </div>`;
 }
 

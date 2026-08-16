@@ -30,6 +30,7 @@ api.include_router(identity.api.router)
 if settings.dev_auth_enabled:
     api.include_router(identity.api.dev_router)
 api.include_router(ledger.api.router)
+api.include_router(ledger.api.default_router)
 
 
 @api.get("/health", tags=["meta"])

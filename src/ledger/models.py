@@ -21,7 +21,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Column, UniqueConstraint
+from sqlalchemy import Column, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, SQLModel
 
@@ -69,8 +69,17 @@ class Frequency(enum.StrEnum):
     yearly = "yearly"
 
 
+class MemberRole(enum.StrEnum):
+    owner = "owner"
+    member = "member"
+
+
 class Book(SQLModel, table=True):
-    """One whole piggy bank — the unit a user syncs, exports and imports."""
+    """One whole piggy bank — the unit a user syncs, exports and imports.
+
+    A user can belong to several: the flat with the housemates, a trip with
+    friends. Each carries its own people, accounts, lists and currencies.
+    """
 
     __tablename__ = "books"
 
@@ -80,17 +89,63 @@ class Book(SQLModel, table=True):
     base_currency: str = Field(default="CHF", max_length=CURRENCY_LENGTH)
     last_pay_method: str | None = Field(default=None, max_length=20)
     rates_updated_at: datetime | None = utc_datetime_field(default=None)
+    # Bumped on every accepted write. The client echoes the version it loaded
+    # back as If-Match, which is what lets a stale PUT be merged rather than
+    # allowed to overwrite somebody else's edits.
+    version: int = Field(default=1)
     created_at: datetime = utc_datetime_field(default_factory=utcnow)
     updated_at: datetime = utc_datetime_field(default_factory=utcnow)
 
 
 class BookMember(SQLModel, table=True):
-    """Who can open a book. Both of you point at the same book."""
+    """Who can open a book, and who they are inside it.
+
+    `person_id` links the account to a Person in the book's tally — Marc signs
+    in and claims the "Marc" row rather than becoming a second Marc. It stays
+    null for a member who hasn't claimed anyone yet.
+    """
 
     __tablename__ = "book_members"
 
     book_id: UUID = Field(foreign_key="books.id", primary_key=True)
     user_id: UUID = Field(foreign_key="users.id", primary_key=True)
+    role: MemberRole = varchar_enum(MemberRole, default=MemberRole.member)
+    person_id: str | None = Field(default=None, max_length=ID_LENGTH)
+    created_at: datetime = utc_datetime_field(default_factory=utcnow)
+
+
+class BookInvite(SQLModel, table=True):
+    """A shareable code that lets whoever holds it join one book.
+
+    Deliberately multi-use until it expires or is revoked: the point is to
+    paste one link into a group chat, not to mint one per friend.
+    """
+
+    __tablename__ = "book_invites"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    book_id: UUID = Field(foreign_key="books.id", index=True)
+    code: str = Field(unique=True, index=True, max_length=32)
+    created_by: UUID = Field(foreign_key="users.id")
+    created_at: datetime = utc_datetime_field(default_factory=utcnow)
+    expires_at: datetime = utc_datetime_field()
+    revoked_at: datetime | None = utc_datetime_field(default=None)
+
+
+class BookSnapshot(SQLModel, table=True):
+    """The book's full wire state at one version.
+
+    Kept so a PUT from a client that loaded version N can be three-way merged
+    against version N rather than clobbering everything written since. Pruned
+    to the most recent few per book; a client older than that gets a 409 and
+    reloads.
+    """
+
+    __tablename__ = "book_snapshots"
+
+    book_id: UUID = Field(foreign_key="books.id", primary_key=True)
+    version: int = Field(primary_key=True)
+    state: str = Field(sa_column=Column(Text, nullable=False))
     created_at: datetime = utc_datetime_field(default_factory=utcnow)
 
 

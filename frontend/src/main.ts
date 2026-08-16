@@ -1,54 +1,76 @@
 import './styles.css';
-import { UI, setState } from './app/context';
-import { render } from './app/render';
+import { setState } from './app/context';
+import { enterBooks, setPendingJoin } from './app/books';
 import { wireEvents } from './app/events';
-import { applyTheme } from './app/theme';
-import { blankState, normalize } from './model/state';
+import { leaveGate, splash } from './app/gate';
+import { fatal, hydrate } from './app/hydrate';
+import { sessionExpired, signInScreen } from './app/auth';
+import { toast } from './app/modals';
+import { adoptRemote, pull, startSync } from './app/sync';
+import { session } from './app/session';
+import { blankState } from './model/state';
+import { detectBackend, hasSession, whoami } from './storage/api';
 import { store } from './storage/store';
-import { thisMonth } from './lib/utils';
-import type { AppState } from './model/types';
+import type { SyncDetail } from './storage/store';
 
-let booted = false;
-
-function fatal(msg: unknown): void {
-  try {
-    if (booted) { console.error(msg); return; }   // app is up and usable: log, don't wipe it
-    const m = document.getElementById('main');
-    if (!m) return;
-    m.innerHTML = '<div class="card" style="margin-top:20px"><h2>Something broke 🙈</h2>' +
-      '<p class="sub" style="margin:10px 0;line-height:1.5">The app hit an error while starting up. ' +
-      'Reloading usually fixes it. If it keeps happening, send this line along:</p>' +
-      '<div class="mono" style="font-size:12px;background:var(--tint);border-radius:10px;padding:10px;word-break:break-word">' +
-      String(msg).replace(/</g, '&lt;') + '</div></div>';
-  } catch { /* nothing left to do */ }
-}
 window.addEventListener('error', (e) => { fatal(e.message || e); });
 window.addEventListener('unhandledrejection', (e) => { fatal((e.reason && e.reason.message) || e.reason); });
 
-function hydrate(loaded: AppState | null): void {
-  const s = normalize(loaded);
-  setState(s);
-  applyTheme(s.settings.theme);
-  UI.ledgerId = (s.ledgers.find((l) => !l.archived) || {}).id ?? null;
-  UI.month = thisMonth();
-  try {
-    render();
-    booted = s.people.length > 0;
-  } catch (err) {
-    booted = false;
-    fatal((err as Error).message);
-  }
-}
+/* Sync news from the server adapter. `state` is what the book actually looks
+   like after the server merged our write with anyone else's, so we adopt it
+   rather than assume our copy won. */
+window.addEventListener('piggy:sync', (e) => {
+  const d = (e as CustomEvent<SyncDetail>).detail;
+  if (d.ok) { if (d.state) adoptRemote(d.state); return; }
+  if (d.expired) { sessionExpired(); return; }
+  if (d.conflict) { void pull(); toast('Caught up with the others'); return; }
+  toast("Couldn't save to the server — your next change will try again");
+});
+
+window.addEventListener('piggy:signedout', () => sessionExpired());
 
 wireEvents();
-
-/* Boot immediately with an empty book, then swap in saved data once storage
-   answers. A slow or blocked storage layer can never leave the app dead. */
 setState(blankState());
-hydrate(null);
-(() => {
-  let done = false;
-  const finish = (data: AppState | null): void => { if (done) return; done = true; if (data) hydrate(data); };
-  setTimeout(() => finish(null), 2500);
-  Promise.resolve().then(() => store.load()).then(finish).catch(() => finish(null));
-})();
+
+/**
+ * Which deployment are we? One probe of /api/health decides:
+ *
+ * - nothing answers (GitHub Pages, a plain static host) — localStorage, no
+ *   sign-in, exactly as before;
+ * - a Piggy backend answers — nothing is rendered until somebody is signed
+ *   in, and the book comes from the server.
+ *
+ * The splash is deliberately late: the probe against a static host 404s in a
+ * few milliseconds, so the Pages build normally paints straight to the book
+ * with nothing flashing in between.
+ */
+async function boot(): Promise<void> {
+  const splashTimer = setTimeout(() => splash('Warming up…'), 300);
+  const [backend, local] = await Promise.all([
+    detectBackend(),
+    store.load().catch(() => null),   // local adapter is still the active one here
+  ]);
+  clearTimeout(splashTimer);
+
+  if (!backend) {
+    session.mode = 'local';
+    leaveGate();
+    hydrate(local);
+    return;
+  }
+
+  session.mode = 'server';
+  /* An invite link is followed after sign-in, never before: previewing one
+     needs an account, so a stranger with a code learns nothing. */
+  setPendingJoin(new URL(location.href).searchParams.get('join'));
+  startSync();   // idles until a book is actually open
+
+  if (!hasSession()) { signInScreen(); return; }
+  splash('Signing you in…');
+  const user = await whoami();
+  if (!user) { signInScreen(); return; }
+  session.user = user;
+  await enterBooks();
+}
+
+void boot().catch((err) => fatal((err as Error).message));
