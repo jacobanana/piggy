@@ -91,7 +91,14 @@ class LoginCodeService:
                     ),
                 )
             except Exception:
-                logger.exception("Failed to send login code email")  # never leak existence
+                # Never leak existence: the request still succeeds. send_email
+                # has already logged why it failed, so all that is left to add
+                # is the way back in while the mail path is broken.
+                logger.warning(
+                    "sign-in code for %s was issued but not emailed — read it with `manage login-code --email %s`",
+                    user.email,
+                    user.email,
+                )
         return verification
 
     def verify(self, verification_id: UUID, code: str) -> User:

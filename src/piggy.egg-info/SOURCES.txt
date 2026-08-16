@@ -30,4 +30,6 @@ src/piggy.egg-info/top_level.txt
 tests/test_auth.py
 tests/test_book.py
 tests/test_manage.py
+tests/test_merge.py
 tests/test_migrations.py
+tests/test_sharing.py

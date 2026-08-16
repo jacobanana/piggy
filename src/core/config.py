@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     smtp_username: str = Field(default="")
     smtp_password: str = Field(default="")
     email_sender: str = Field(default="piggy@localhost")
+    # A relay that accepts the connection and then never answers would
+    # otherwise hang the sign-in request until the client gives up.
+    smtp_timeout: int = Field(default=15)
+    # Emits the SMTP conversation at DEBUG. Never on by default: the dialogue
+    # contains the base64 AUTH exchange, which is the password in clear.
+    smtp_debug: bool = Field(default=False)
+
+    # --- logging ------------------------------------------------------------
+    log_level: str = Field(default="INFO")
 
     # --- frontend -----------------------------------------------------------
     frontend_url: str = Field(default="http://localhost:5173")

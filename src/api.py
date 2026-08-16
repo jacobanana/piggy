@@ -10,8 +10,12 @@ import identity.api
 import ledger.api
 from core.config import get_settings
 from core.http import register_exception_handlers
+from core.logging import configure_logging
 
 settings = get_settings()
+# Before anything else logs: uvicorn only wires its own loggers, so without
+# this the application's own records have nowhere to go.
+configure_logging()
 
 app = FastAPI(title="Piggy", version="1.0.0")
 

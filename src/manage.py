@@ -12,10 +12,14 @@ the database sits behind the same door.
 """
 
 import argparse
+import logging
 import sys
 
 from sqlmodel import Session, col, select
 
+from core.config import get_settings
+from core.email import EmailSendError, send_email
+from core.logging import configure_logging
 from core.utils import utcnow
 from database.connection import engine
 from identity.models import EmailVerification, User, UserRole
@@ -149,6 +153,48 @@ def cmd_login_code(args: argparse.Namespace) -> None:
             print(f"WARNING: {args.email} {reason} — this code will not sign anyone in.")
 
 
+def cmd_test_email(args: argparse.Namespace) -> None:
+    """Send one message through the configured relay and say what happened.
+
+    A sign-in code that never arrives cannot tell you whether the relay
+    refused the password or the mailbox filed it as spam. This separates the
+    two, without needing an account or a login attempt to do it.
+    """
+    settings = get_settings()
+    password = f"set ({len(settings.smtp_password)} chars)" if settings.smtp_password else "EMPTY"
+    print("SMTP_HOST      " + (settings.smtp_host or "EMPTY — codes are logged, not sent"))
+    print(f"SMTP_PORT      {settings.smtp_port}")
+    print("SMTP_USERNAME  " + (settings.smtp_username or "EMPTY — codes are logged, not sent"))
+    print(f"SMTP_PASSWORD  {password}")
+    print(f"EMAIL_SENDER   {settings.email_sender}")
+    print(f"SMTP_TIMEOUT   {settings.smtp_timeout}s\n")
+
+    if args.debug:
+        settings.smtp_debug = True
+        configure_logging("DEBUG", force=True)
+
+    try:
+        send_email(
+            to=args.to,
+            subject="Piggy test email",
+            body=(
+                "This is a test message from `manage test-email`.\n\n"
+                "If you are reading it, the relay accepted Piggy's credentials and "
+                "sign-in codes can reach this address."
+            ),
+        )
+    except EmailSendError as exc:
+        sys.exit(f"\nNOT SENT: {exc}")
+
+    if not settings.smtp_host or not settings.smtp_username:
+        sys.exit("\nNothing was sent: SMTP is not configured, so the message went to the log above.")
+    print(
+        f"\nAccepted by {settings.smtp_host} for delivery to {args.to}.\n"
+        "If it never lands, the relay took it and something after that dropped it — "
+        "check the spam folder, then the zone's SPF/DKIM/DMARC."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="manage", description="User administration for Piggy.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -190,13 +236,25 @@ def build_parser() -> argparse.ArgumentParser:
     code_parser.add_argument("--email", required=True)
     code_parser.set_defaults(func=cmd_login_code)
 
+    mail_parser = subparsers.add_parser("test-email", help="Send a test message through the configured SMTP relay")
+    mail_parser.add_argument("--to", required=True, help="Address to send the test to")
+    mail_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print the SMTP conversation. Contains the AUTH exchange — the password, base64-encoded. Do not paste it.",
+    )
+    mail_parser.set_defaults(func=cmd_test_email)
+
     return parser
 
 
 def main() -> None:
     # The engine echoes SQL in development, which would bury the one line this
-    # tool exists to print — a sign-in code read under pressure.
+    # tool exists to print — a sign-in code read under pressure. Application
+    # logs go to stderr for the same reason: stdout stays the answer.
     engine.echo = False
+    configure_logging()
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     args = build_parser().parse_args()
     args.func(args)
 

@@ -59,6 +59,13 @@ picture. Send them as you go, not batched at the very end.
 --role admin`. Sign-in codes print to the backend log when SMTP is unset;
 `uv run manage login-code --email ...` reads the pending one back.
 
+**When mail doesn't arrive**: `uv run manage test-email --to you@example.com`
+prints the SMTP settings in force and sends one message through them, so a
+refused password is told apart from a message that was accepted and then
+filed as spam. Providers issue a separate application password for SMTP
+(Infomaniak calls it a connected device) — the mailbox's own password is
+refused at the relay, however well it works in webmail.
+
 Most sessions here are fired from a phone and read back as a pull request.
 A stated bug, a scoped issue, a change already described — build it and push
 it. Ask first only when the data model or a user-facing flow would change
