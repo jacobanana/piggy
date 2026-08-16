@@ -7,6 +7,7 @@ import {
   saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal, settleModal,
   settlementForm, toast,
 } from './modals';
+import { backToEmail, doSignOut, retry, sendCode, submitCode } from './auth';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { applyTheme } from './theme';
 import { blankState } from '../model/state';
@@ -22,6 +23,13 @@ export function wireEvents(): void {
     if (!S) return;
     const l = activeLedger();
     switch (act) {
+      /* sign-in gate (self-hosted build only) */
+      case 'auth-send': case 'auth-resend': void sendCode(); return;
+      case 'auth-verify': void submitCode(); return;
+      case 'auth-back': backToEmail(); return;
+      case 'auth-retry': retry(); return;
+      case 'signout': closeModal(); doSignOut(); return;
+
       case 'backdrop': if (e.target === el) closeModal(); return;
       case 'close': closeModal(); return;
       case 'ledger': UI.ledgerId = id; UI.month = thisMonth(); render(); return;
@@ -198,5 +206,11 @@ export function wireEvents(): void {
     if (t.id === 'importFile' && t.files && t.files[0]) importJSONFile(t.files[0]);
   });
 
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeModal(); return; }
+    if (e.key !== 'Enter') return;
+    const id = (e.target as HTMLElement).id;
+    if (id === 'authEmail') { e.preventDefault(); void sendCode(); }
+    if (id === 'authCode') { e.preventDefault(); void submitCode(); }
+  });
 }

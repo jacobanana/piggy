@@ -1,12 +1,17 @@
 /**
- * Persistence for the GitHub Pages build: JSON in localStorage, with the
- * artifact-style `window.storage` used first when a host provides one.
+ * Persistence, behind two calls. Two adapters implement them:
  *
- * The interface is deliberately tiny so a backend-API adapter can slot in
- * behind the same two calls when the FastAPI server lands.
+ * - `localAdapter` — JSON in localStorage (the GitHub Pages build), with the
+ *   artifact-style `window.storage` used first when a host provides one.
+ * - `serverAdapter` — GET/PUT /api/book on the self-hosted build.
+ *
+ * `store` delegates to whichever is active, so callers never learn which
+ * deployment they are in. Boot picks one via `useAdapter`; the default is
+ * local, which is what keeps a backend-less Pages build working.
  */
 import type { AppState } from '../model/types';
 import { STORAGE_KEY } from '../model/state';
+import { ApiError, getBook, putBook } from './api';
 
 interface HostStorage {
   get(key: string): Promise<{ value?: string } | null>;
@@ -22,7 +27,7 @@ export interface StorageAdapter {
   save(data: AppState): Promise<boolean>;
 }
 
-export const store: StorageAdapter = {
+export const localAdapter: StorageAdapter = {
   async load() {
     if (typeof window !== 'undefined' && window.storage) {
       try {
@@ -46,4 +51,53 @@ export const store: StorageAdapter = {
     }
     try { localStorage.setItem(STORAGE_KEY, json); return true; } catch { return false; }
   },
+};
+
+/**
+ * Sync news for the app layer, as a window event so that storage stays free
+ * of DOM imports. `ok: false` means the last write did not land; `expired`
+ * means the session is gone and the sign-in screen has to come back.
+ */
+export interface SyncDetail { ok: boolean; expired: boolean }
+
+function announce(ok: boolean, expired = false): void {
+  window.dispatchEvent(new CustomEvent<SyncDetail>('piggy:sync', { detail: { ok, expired } }));
+}
+
+/**
+ * Writes are chained rather than fired in parallel: the endpoint replaces the
+ * whole book, so two overlapping PUTs could land out of order and the older
+ * one would win.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+export const serverAdapter: StorageAdapter = {
+  async load() {
+    return getBook();   // a failure here is fatal to boot; main.ts decides what to show
+  },
+  save(data) {
+    const snapshot = JSON.parse(JSON.stringify(data)) as AppState;
+    const run = queue.then(async () => {
+      try {
+        await putBook(snapshot);
+        announce(true);
+        return true;
+      } catch (err) {
+        announce(false, err instanceof ApiError && err.status === 401);
+        return false;
+      }
+    });
+    queue = run;
+    return run;
+  },
+};
+
+let active: StorageAdapter = localAdapter;
+
+export function useAdapter(adapter: StorageAdapter): void { active = adapter; }
+export const usingServer = (): boolean => active === serverAdapter;
+
+export const store: StorageAdapter = {
+  load: () => active.load(),
+  save: (data) => active.save(data),
 };

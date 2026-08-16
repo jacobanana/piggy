@@ -3,6 +3,7 @@ import type { Account, Expense, Ledger, Person, Rule, Settlement, Split, SplitMo
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
+import { onServer, session } from './session';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
 import { computeBalances, simplifyDebts } from '../domain/balances';
@@ -512,9 +513,14 @@ export function settingsModal(): void {
     <div class="row-btns"><button class="btn soft" data-act="export">Export JSON</button>
       <button class="btn soft" data-act="import">Import JSON</button>
       <button class="btn soft" data-act="export-csv">Export CSV</button></div>
-    <div class="hint">Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.</div>
+    <div class="hint">${onServer()
+      ? 'This book lives on the server, so it follows you to any device you sign in on. Import loads a Piggy export straight into it; export gives you the full, portable data model back.'
+      : 'Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.'}</div>
     <div style="margin-top:14px"><button class="btn danger wide" data-act="reset">Erase everything</button></div>
     <input type="file" id="importFile" accept="application/json" style="display:none">
+    ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Account</h2></div>' +
+      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>.</div>' +
+      '<div style="margin-top:10px"><button class="btn soft wide" data-act="signout">Sign out</button></div>' : ''}
     <div class="divider"></div>
     <button class="btn primary wide" data-act="save-settings">Save settings</button>`);
 }
