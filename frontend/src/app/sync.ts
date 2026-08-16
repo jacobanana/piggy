@@ -17,11 +17,30 @@ const POLL_MS = 15000;
 /** Re-rendering under an open modal would yank the form out from under it. */
 const modalOpen = (): boolean => Boolean($('#modalRoot')?.firstChild);
 
+/**
+ * A repaint we owe the screen because a modal was over it when the news
+ * arrived. It has to be remembered: the state is adopted either way, and the
+ * poll only hands a version back once — every later tick sees itself as
+ * current and returns nothing — so a skipped repaint is never offered again.
+ * That is how somebody else's expense could stay off the list for good, with
+ * the app holding it in memory the whole time.
+ */
+let owedRepaint = false;
+
 /** Take the server's copy as the truth, and only repaint if it says something new. */
 export function adoptRemote(state: AppState): void {
   if (JSON.stringify(state) === JSON.stringify(S)) return;
   setState(normalize(state));
-  if (!modalOpen()) render();
+  if (modalOpen()) { owedRepaint = true; return; }
+  owedRepaint = false;
+  render();
+}
+
+/** Paint what landed while a modal was covering the screen. Called on close. */
+export function repaintIfOwed(): void {
+  if (!owedRepaint) return;
+  owedRepaint = false;
+  render();
 }
 
 export async function pull(): Promise<void> {
