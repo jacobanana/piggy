@@ -15,6 +15,12 @@ Everything stays in your browser's localStorage; export/import JSON any time.
 | Frontend | Vite + TypeScript, no framework | the same build, served by the backend |
 | Persistence | localStorage + JSON export | Postgres via `GET/PUT /api/book` |
 | Auth | none | passwordless email codes → JWT |
+| Shipped by | `release.yml` → GitHub Pages | `release.yml` → a GHCR image → [mixedmode-deploy](https://github.com/jacobanana/mixedmode-deploy) |
+
+Both ship from the same green commit on every push to `main`. The self-hosted
+half runs on a small box shared with a few other apps, described in that second
+repo — this one builds the image and names it; that one records the version as
+a commit and rolls the stack over, so a rollback is a revert there.
 
 The data model is identical in both: `frontend/src/model/types.ts` and
 `src/ledger/models.py` mirror each other field for field, and a Piggy JSON

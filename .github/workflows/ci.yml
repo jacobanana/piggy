@@ -1,5 +1,5 @@
 # Pre-merge feedback on pull requests. Push to main runs the same jobs
-# inside deploy-pages.yml instead, so nothing runs twice.
+# inside release.yml instead, so nothing runs twice.
 
 name: CI
 
