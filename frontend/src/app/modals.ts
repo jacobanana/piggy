@@ -6,7 +6,7 @@ import { avatar, commit } from './render';
 import { myPersonId, onServer, session } from './session';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
-import { $, dayLabel, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
+import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
 import { computeBalances, pairwiseDebt, simplifyDebts } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
 import { defaultAccountId, itemsInScope, overrideOf } from '../domain/selectors';
@@ -346,8 +346,7 @@ export function rulesModal(): void {
 /* ---------- settle up ---------- */
 export function settleModal(): void {
   const l = activeLedger()!;
-  const scope = l.kind === 'trip' ? null : UI.scope === 'all' ? null : UI.month;
-  const debts = simplifyDebts(computeBalances(S, l.id, scope));
+  const debts = simplifyDebts(computeBalances(S, l.id));
   const body = debts.length ? debts.map((d) => {
     const a = person(d.from), b = person(d.to);
     return '<div class="debt" style="flex-wrap:wrap">' + avatar(a, 'lg') + '<span class="arrow">→</span>' + avatar(b, 'lg') +
@@ -356,7 +355,7 @@ export function settleModal(): void {
       '<button class="btn soft sm" data-act="new-settle" data-from="' + d.from + '" data-to="' + d.to + '" data-c="' + d.cents + '">Part of it…</button></div>';
   }).join('') : '<div class="empty"><span class="big">🎉</span>Nothing to settle.</div>';
   openModal(head('Settle up') +
-    '<div class="sub" style="margin:-8px 0 14px">Tap Paid in full once the money has actually moved — it gets logged so the next tally starts fresh. Part of it… lets you log a smaller amount.</div>' +
+    '<div class="sub" style="margin:-8px 0 14px">Tap Paid in full once the money has actually moved — it is logged on today\'s date and comes straight off the running tally. Part of it… lets you log a smaller amount.</div>' +
     (debts.length ? '<div class="field"><label>How it travelled</label>' + payMethodChips(lastPayMethod()) + '</div>' : '') +
     body +
     '<div class="divider"></div>' +
@@ -365,8 +364,9 @@ export function settleModal(): void {
 }
 export function doSettle(from: string, to: string, c: string | number): void {
   const l = activeLedger()!;
-  const inMonth = l.kind !== 'trip' && UI.scope === 'month' && UI.month !== monthOf(todayISO());
-  const date = inMonth ? UI.month + '-' + daysInMonth(UI.month) : todayISO();
+  /* Dated today whatever month is on screen: a repayment is recorded when the
+     money moved, not against the month whose expenses it happens to cover. */
+  const date = todayISO();
   const method = F.method || lastPayMethod();
   S.settings.lastPayMethod = method;
   S.settlements.push({
@@ -400,15 +400,13 @@ const everyItem = (): LedgerItem[] => itemsInScope(S, activeLedger()!.id, null);
  * what it alone makes `from` owe `to`.
  */
 function pickable(from: string, to: string): { it: LedgerItem; owed: number }[] {
-  const l = activeLedger()!;
-  const scope = l.kind === 'trip' ? null : UI.scope === 'all' ? null : UI.month;
-  const inScope = new Set(itemsInScope(S, l.id, scope).map((it) => it.id));
   const picked = F.items || [];
   return everyItem()
     .map((it) => ({ it, owed: pairwiseDebt(S, it, from, to) }))
-    /* Something already ticked stays listed even once it is out of scope or
-       square, so editing an old repayment never silently drops it. */
-    .filter((c) => picked.includes(c.it.id) || (inScope.has(c.it.id) && c.owed > 0))
+    /* Every month is on offer, not just the one on screen — paying in July for
+       August's rent is the ordinary case. Something already ticked stays listed
+       even once it is square, so editing an old repayment never drops it. */
+    .filter((c) => picked.includes(c.it.id) || c.owed > 0)
     .sort((a, b) => (a.it.date === b.it.date ? 0 : a.it.date < b.it.date ? 1 : -1));
 }
 

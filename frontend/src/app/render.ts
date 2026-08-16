@@ -5,7 +5,7 @@ import { COLORS } from './theme';
 import { onServer } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, cents, dayLabel, esc, fromCents, money, monthLabel, monthOf, thisMonth } from '../lib/utils';
-import { computeBalances, categoryTotals, paidByTotals, settlementsInScope, simplifyDebts } from '../domain/balances';
+import { computeBalances, categoryTotals, paidByTotals, settlementsFor, simplifyDebts } from '../domain/balances';
 import { occurrencesFor, plannedInScope, plannedShares, upcomingRules } from '../domain/selectors';
 
 export function commit(): void { save(); render(); }
@@ -86,18 +86,22 @@ function renderNoLedger(): void {
 }
 
 /* ---------- receipt ---------- */
-export function receiptCard(l: Ledger, monthKey: MonthKey | null): string {
-  const bal = computeBalances(S, l.id, monthKey);
-  const paid = paidByTotals(S, l.id, monthKey);
+/**
+ * The tally. It spans the whole ledger and ignores the month nav on purpose:
+ * a repayment made in July for August's bills still has to count, so there is
+ * one running balance rather than one per month.
+ */
+export function receiptCard(l: Ledger): string {
+  const bal = computeBalances(S, l.id);
+  const paid = paidByTotals(S, l.id);
   const debts = simplifyDebts(bal);
-  const scopeLabel = monthKey ? monthLabel(monthKey) : 'everything so far';
   const rows = S.people.map((p) => {
     const b = bal[p.id] || 0;
     return '<div class="rrow"><span>' + esc(p.emoji) + ' ' + esc(p.name) + '</span><span class="dots"></span>' +
       '<span class="val ' + (b > 1 ? 'pos' : b < -1 ? 'neg' : '') + '">' + (b > 1 ? '+' : '') + fromCents(b).toFixed(2) + '</span></div>';
   }).join('');
   const paidRows = S.people.map((p) => '<div class="rrow" style="color:var(--ink-soft)"><span>paid by ' + esc(p.name) + '</span><span class="dots"></span><span>' + fromCents(paid[p.id] || 0).toFixed(2) + '</span></div>').join('');
-  const settled = settlementsInScope(S, l.id, monthKey);
+  const settled = settlementsFor(S, l.id);
   const back: Record<string, number> = {};
   S.people.forEach((p) => { back[p.id] = 0; });
   settled.forEach((s) => {
@@ -109,16 +113,13 @@ export function receiptCard(l: Ledger, monthKey: MonthKey | null): string {
     fromCents(back[p.id] || 0).toFixed(2) + '</span></div>').join('') : '';
   const body = debts.length ? debts.map((d) => {
     const a = person(d.from), b = person(d.to);
-    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div><div class="sub">' + esc(scopeLabel) + '</div></div>' +
+    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div><div class="sub">everything so far</div></div>' +
       '<span class="amt">' + money(fromCents(d.cents), baseCur()) + '</span></div>';
   }).join('') : '<div class="stamp">ALL SQUARE ✨</div>';
 
-  const scopeSeg = l.kind === 'trip' ? '' :
-    '<div class="seg" style="margin-bottom:14px"><button data-act="scope" data-v="month" class="' + (UI.scope === 'month' ? 'on' : '') + '">This month</button>' +
-    '<button data-act="scope" data-v="all" class="' + (UI.scope === 'all' ? 'on' : '') + '">All time</button></div>';
-
-  return '<div class="receipt" style="padding-top:22px">' + scopeSeg +
+  return '<div class="receipt" style="padding-top:22px">' +
     '<div class="receipt-title">the tally · ' + esc(baseCur()) + '</div>' +
+    (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">Every month together, whenever the money moved</div>') +
     rows + '<div class="tear"></div>' + paidRows + backRows + '<div class="tear"></div>' + body +
     (debts.length ? '<button class="btn mint wide" style="margin-top:14px" data-act="settle">Settle up 🤝</button>' : '') +
     '</div>';
@@ -156,8 +157,12 @@ function repaymentRow(s: Settlement): string {
     (foreign ? '<small>' + money(s.amount, s.currency) + '</small>' : '') + '</div></div>';
 }
 
-function repaymentsCard(l: Ledger, monthKey: MonthKey | null): string {
-  const list = settlementsInScope(S, l.id, monthKey);
+/**
+ * The one repayment log for the ledger. Grouped by the month the money moved
+ * — which is when it happened, not which month's expenses it was for.
+ */
+function repaymentsCard(l: Ledger): string {
+  const list = settlementsFor(S, l.id);
   const moved = list.reduce((sum, s) => sum + cents(toBase(s.amount, s.currency, s.fxRate)), 0);
   const perPair: Record<string, number> = {};
   list.forEach((s) => {
@@ -169,13 +174,16 @@ function repaymentsCard(l: Ledger, monthKey: MonthKey | null): string {
     return '<div class="rrow"><span>' + esc(person(f)?.name || '?') + ' → ' + esc(person(t)?.name || '?') +
       '</span><span class="dots"></span><span class="val">' + fromCents(c).toFixed(2) + '</span></div>';
   }).join('');
+  const months: MonthKey[] = [];
+  list.forEach((s) => { const m = monthOf(s.date); if (!months.includes(m)) months.push(m); });
+  const rows = months.map((m) =>
+    (months.length > 1 ? '<div class="daygroup">' + monthLabel(m) + '</div>' : '') +
+    '<div class="list">' + list.filter((s) => monthOf(s.date) === m).map(repaymentRow).join('') + '</div>').join('');
   return '<div class="card"><div class="card-head"><h2>🤝 Repayments</h2>' +
     '<span class="sub">' + (list.length ? list.length + ' · ' + money(fromCents(moved), baseCur()) + ' moved' : 'none yet') + '</span></div>' +
     (list.length
-      ? '<div class="list">' + list.map(repaymentRow).join('') + '</div>' +
-        (Object.keys(perPair).length > 1 ? '<div class="divider"></div>' + summary : '')
-      : '<div class="empty"><span class="big">💸</span>No money has moved ' + (monthKey ? 'in ' + monthLabel(monthKey) : 'yet') +
-        '.<br>The tally above says who should pay whom.</div>') +
+      ? rows + (Object.keys(perPair).length > 1 ? '<div class="divider"></div>' + summary : '')
+      : '<div class="empty"><span class="big">💸</span>No money has moved yet.<br>The tally above says who should pay whom.</div>') +
     '<button class="btn soft wide" style="margin-top:12px" data-act="new-settle">＋ Log a repayment</button></div>';
 }
 
@@ -230,7 +238,6 @@ function householdView(l: Ledger): string {
   const recs = occurrencesFor(S, l.id, mk);
   const ad = S.expenses.filter((e) => e.ledgerId === l.id && monthOf(e.date) === mk && !e.planned)
     .sort((a, b) => (a.date === b.date ? (b.createdAt || '').localeCompare(a.createdAt || '') : a.date < b.date ? 1 : -1));
-  const scope = UI.scope === 'all' ? null : mk;
   const recTotal = recs.filter((o) => !o.skipped).reduce((s, o) => s + cents(toBase(o.amount, o.currency, o.fxRate)), 0);
   const adTotal = ad.reduce((s, e) => s + cents(toBase(e.amount, e.currency, e.fxRate)), 0);
   const planTotal = plannedInScope(S, l.id, mk).reduce((s, e) => s + cents(toBase(e.amount, e.currency, e.fxRate)), 0);
@@ -251,7 +258,7 @@ function householdView(l: Ledger): string {
     <div class="tot" style="border-color:var(--ink)"><div class="k">${planTotal ? 'Paid' : 'Total'} ${esc(baseCur())}</div><div class="v">${fromCents(recTotal + adTotal).toFixed(0)}</div></div>
   </div>`;
 
-  out += receiptCard(l, scope);
+  out += receiptCard(l);
 
   out += '<div class="card"><div class="card-head"><h2>🔁 Recurring</h2>' +
     '<button class="btn soft sm" data-act="rules">Manage</button></div>' +
@@ -266,7 +273,7 @@ function householdView(l: Ledger): string {
     '</div>';
 
   out += plannedCard(l, mk);
-  out += repaymentsCard(l, scope);
+  out += repaymentsCard(l);
   out += catCard(l.id, mk);
 
   if (soon.length) {
@@ -309,7 +316,7 @@ function tripView(l: Ledger): string {
       ' planned · <b>' + money(fromCents(total + planTotal), baseCur()) + '</b> all in</div>' : '') +
     '</div>';
 
-  out += receiptCard(l, null);
+  out += receiptCard(l);
 
   if (!items.length) {
     out += '<div class="card"><div class="empty"><span class="big">🧳</span>' +
@@ -321,7 +328,7 @@ function tripView(l: Ledger): string {
       ).join('') + '</div>';
   }
   out += plannedCard(l, null);
-  out += repaymentsCard(l, null);
+  out += repaymentsCard(l);
   if (items.length) out += catCard(l.id, null);
   return out;
 }

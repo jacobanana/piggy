@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, simplifyDebts } from './balances';
+import { computeBalances, pairwiseDebt, settlementsFor, simplifyDebts } from './balances';
 import { blankState } from '../model/state';
 import type { AppState, Expense, Settlement } from '../model/types';
 
@@ -29,11 +29,18 @@ const expense = (over: Partial<Expense>): Expense => ({
   ...over,
 });
 
+/** Marc handing Léa 50 — exactly half of the fixture's 100 expense. */
+const settlement = (over: Partial<Settlement>): Settlement => ({
+  id: 's1', ledgerId: 'home', date: '2025-03-15', fromPersonId: 'marc', toPersonId: 'lea',
+  amount: 50, currency: 'CHF', fxRate: 1, method: 'cash', note: '', createdAt: '2025-03-15T00:00:00Z',
+  ...over,
+});
+
 describe('computeBalances', () => {
   it('credits the payer and debits everyone their share', () => {
     const s = fixture();
     s.expenses = [expense({})];   // Léa pays 100, split evenly
-    const bal = computeBalances(s, 'home', '2025-03');
+    const bal = computeBalances(s, 'home');
     expect(bal.lea).toBe(5000);   // paid 10000, owes 5000
     expect(bal.marc).toBe(-5000);
   });
@@ -41,7 +48,7 @@ describe('computeBalances', () => {
   it('keeps joint-account spending square when split evenly', () => {
     const s = fixture();
     s.expenses = [expense({ accountId: 'acc-joint' })];
-    const bal = computeBalances(s, 'home', '2025-03');
+    const bal = computeBalances(s, 'home');
     expect(bal.lea).toBe(0);
     expect(bal.marc).toBe(0);
   });
@@ -49,7 +56,7 @@ describe('computeBalances', () => {
   it('leaves planned expenses out of the tally', () => {
     const s = fixture();
     s.expenses = [expense({ planned: true })];
-    const bal = computeBalances(s, 'home', '2025-03');
+    const bal = computeBalances(s, 'home');
     expect(bal.lea).toBe(0);
     expect(bal.marc).toBe(0);
   });
@@ -57,7 +64,7 @@ describe('computeBalances', () => {
   it('converts foreign amounts through the snapshotted rate', () => {
     const s = fixture();
     s.expenses = [expense({ amount: 100, currency: 'EUR', fxRate: 0.9 })];
-    const bal = computeBalances(s, 'home', '2025-03');
+    const bal = computeBalances(s, 'home');
     expect(bal.lea).toBe(4500);
     expect(bal.marc).toBe(-4500);
   });
@@ -65,21 +72,51 @@ describe('computeBalances', () => {
   it('cancels debts with settlements', () => {
     const s = fixture();
     s.expenses = [expense({})];
-    const st: Settlement = {
-      id: 's1', ledgerId: 'home', date: '2025-03-15', fromPersonId: 'marc', toPersonId: 'lea',
-      amount: 50, currency: 'CHF', fxRate: 1, method: 'cash', note: '', createdAt: '2025-03-15T00:00:00Z',
-    };
-    s.settlements = [st];
-    const bal = computeBalances(s, 'home', '2025-03');
+    s.settlements = [settlement({})];
+    const bal = computeBalances(s, 'home');
     expect(bal.lea).toBe(0);
     expect(bal.marc).toBe(0);
   });
 
-  it('scopes to a month, or everything when monthKey is null', () => {
+  it('carries on across months rather than resetting each one', () => {
     const s = fixture();
     s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02' })];
-    expect(computeBalances(s, 'home', '2025-03').marc).toBe(-5000);
-    expect(computeBalances(s, 'home', null).marc).toBe(-10000);
+    expect(computeBalances(s, 'home').marc).toBe(-10000);
+  });
+
+  /* The whole point of one running tally: money handed over in July for
+     August's expenses is still money handed over. */
+  it('counts a repayment made before the expenses it was for', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04' })];
+    s.settlements = [settlement({ date: '2025-07-28' })];
+    expect(computeBalances(s, 'home').marc).toBe(0);
+    expect(computeBalances(s, 'home').lea).toBe(0);
+  });
+
+  it('leaves a prepayment sitting as credit until the expense lands', () => {
+    const s = fixture();
+    s.settlements = [settlement({ date: '2025-07-28' })];
+    expect(computeBalances(s, 'home').marc).toBe(5000);
+    expect(computeBalances(s, 'home').lea).toBe(-5000);
+  });
+});
+
+describe('settlementsFor', () => {
+  it('returns every repayment in the ledger, newest first', () => {
+    const s = fixture();
+    s.settlements = [
+      settlement({ id: 's-jul', date: '2025-07-28' }),
+      settlement({ id: 's-sep', date: '2025-09-02' }),
+      settlement({ id: 's-aug', date: '2025-08-15' }),
+    ];
+    expect(settlementsFor(s, 'home').map((x) => x.id)).toEqual(['s-sep', 's-aug', 's-jul']);
+  });
+
+  it('ignores repayments belonging to another ledger', () => {
+    const s = fixture();
+    s.settlements = [settlement({}), settlement({ id: 's2', ledgerId: 'trip' })];
+    expect(settlementsFor(s, 'home').map((x) => x.id)).toEqual(['s1']);
   });
 });
 
@@ -120,7 +157,7 @@ describe('pairwiseDebt', () => {
         - pairwiseDebt(s, { ...e, kind: 'adhoc' }, 'lea', 'marc'),
       0,
     );
-    expect(owed).toBe(-computeBalances(s, 'home', '2025-03').marc);
+    expect(owed).toBe(-computeBalances(s, 'home').marc);
   });
 });
 

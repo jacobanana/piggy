@@ -69,7 +69,6 @@ export function wireEvents(): void {
         }
         return;
       case 'month': UI.month = v === '0' ? thisMonth() : addMonths(UI.month, Number(v)); render(); return;
-      case 'scope': UI.scope = v as 'month' | 'all'; render(); return;
       case 'add': if (l && l.kind === 'trip') expenseForm(); else addChooser(); return;
       case 'new-exp': expenseForm(); return;
       case 'new-rule': ruleForm(); return;
@@ -209,7 +208,7 @@ export function wireEvents(): void {
       case 'reset':
         if (confirm('Erase everything and start over?')) {
           setState(blankState());
-          UI.ledgerId = null; UI.month = thisMonth(); UI.scope = 'month';
+          UI.ledgerId = null; UI.month = thisMonth();
           closeModal(); commit();
         }
         return;
