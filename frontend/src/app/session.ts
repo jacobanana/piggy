@@ -21,16 +21,29 @@ export const session: Session = { mode: 'local', user: null, book: null };
 export const onServer = (): boolean => session.mode === 'server';
 export const isOwner = (): boolean => session.book?.role === 'owner';
 
-/** Which book to reopen on the next visit. */
+/**
+ * Which book to reopen on the next visit, remembered per account: two people
+ * sharing a phone must not inherit each other's, and signing out must not
+ * lose it — coming back to the wrong piggy bank files your expenses where
+ * nobody you share with can see them.
+ */
 const LAST_BOOK_KEY = 'piggy.book.v1';
+
+const bookKey = (): string => (session.user ? LAST_BOOK_KEY + '.' + session.user.id : LAST_BOOK_KEY);
 
 export function rememberBook(id: string | null): void {
   try {
-    if (id) localStorage.setItem(LAST_BOOK_KEY, id);
-    else localStorage.removeItem(LAST_BOOK_KEY);
-  } catch { /* private mode: we just reopen the first book instead */ }
+    if (id) localStorage.setItem(bookKey(), id);
+    else localStorage.removeItem(bookKey());
+  } catch { /* private mode: we just ask which book instead */ }
 }
 
 export function lastBook(): string | null {
-  try { return localStorage.getItem(LAST_BOOK_KEY); } catch { return null; }
+  try {
+    // The unkeyed value is what installs from before per-account memory left
+    // behind; it is still the right book for whoever is signed in there.
+    return localStorage.getItem(bookKey()) ?? localStorage.getItem(LAST_BOOK_KEY);
+  } catch {
+    return null;
+  }
 }
