@@ -120,6 +120,20 @@ export function settlementsFor(s: AppState, ledgerId: string): Settlement[] {
       : a.date < b.date ? 1 : -1));
 }
 
+/**
+ * Ledger item ids already logged against a repayment — settled once, so not
+ * worth offering again next time. `exceptId` is the repayment being edited,
+ * whose own items stay on the table.
+ */
+export function settledItemIds(s: AppState, ledgerId: string, exceptId?: string | null): Set<string> {
+  const out = new Set<string>();
+  s.settlements.forEach((x) => {
+    if (x.ledgerId !== ledgerId || (exceptId && x.id === exceptId)) return;
+    (x.itemIds || []).forEach((id) => out.add(id));
+  });
+  return out;
+}
+
 /** Spend per category emoji, biggest first, in base-currency cents. */
 export function categoryTotals(s: AppState, ledgerId: string, monthKey: MonthKey | null): [string, number][] {
   const map: Record<string, number> = {};
