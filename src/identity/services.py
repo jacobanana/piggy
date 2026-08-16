@@ -69,6 +69,24 @@ class UserService:
     def get_user_by_email(self, email: str) -> User | None:
         return self.session.exec(select(User).where(User.email == email)).first()
 
+    def ensure_user(self, email: str, name: str | None = None) -> User:
+        """The account for this address, made if there isn't one yet.
+
+        Only ever called behind a live invite code — there is no open sign-up
+        — so an account appears exactly when somebody was handed a link to a
+        piggy bank. A deactivated account is handed back untouched: verify
+        refuses it, which is the point of deactivating it.
+        """
+        address = email.strip().lower()
+        user = self.get_user_by_email(address)
+        if user is not None:
+            return user
+        user = User(email=address, name=(name or "").strip() or address.split("@")[0], is_active=True)
+        self.session.add(user)
+        self.session.commit()
+        self.session.refresh(user)
+        return user
+
 
 class LoginCodeService:
     def __init__(self, session: Session):

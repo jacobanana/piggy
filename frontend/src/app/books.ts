@@ -14,8 +14,8 @@ import { closeModal, head, openModal, toast } from './modals';
 import { render } from './render';
 import { isOwner, lastBook, rememberBook, session } from './session';
 import {
-  ApiError, acceptInvite, claimPerson, createBook, createInvite, inviteUrl, listBooks,
-  listInvites, listMembers, previewInvite, removeMember, revokeInvite,
+  ApiError, acceptInvite, claimPerson, createBook, createInvite, getInvite, inviteUrl,
+  listBooks, listMembers, previewInvite, removeMember, revokeInvite,
 } from '../storage/api';
 import type { BookSummary, Invite, InvitePreview, Member } from '../storage/api';
 import { store, useServerBook } from '../storage/store';
@@ -23,9 +23,12 @@ import { blankState } from '../model/state';
 import { $, esc } from '../lib/utils';
 
 /** A `?join=CODE` link, parked until we know who is signed in. */
-let pendingJoin: string | null = null;
+let parkedJoin: string | null = null;
 
-export function setPendingJoin(code: string | null): void { pendingJoin = code; }
+export function setPendingJoin(code: string | null): void { parkedJoin = code; }
+
+/** What the sign-in gate reads to know it is showing somebody the door in. */
+export function pendingJoin(): string | null { return parkedJoin; }
 
 /** Drop ?join= from the address bar so a reload doesn't re-run the join. */
 function clearJoinParam(): void {
@@ -46,9 +49,9 @@ function clearJoinParam(): void {
 export async function enterBooks(): Promise<void> {
   splash('Fetching your piggy banks…');
   try {
-    if (pendingJoin) {
-      const code = pendingJoin;
-      pendingJoin = null;
+    if (parkedJoin) {
+      const code = parkedJoin;
+      parkedJoin = null;
       clearJoinParam();
       if (await showJoinGate(code)) return;
     }
@@ -232,12 +235,25 @@ function memberRow(m: Member, people: { id: string; name: string; emoji: string 
     '</div>';
 }
 
-function inviteRow(i: Invite): string {
-  return '<div class="item"><div class="emo">🔗</div>' +
-    '<div class="item-main"><div class="name mono">' + esc(i.code) + '</div>' +
-    '<div class="meta"><span>expires ' + esc(i.expiresAt.slice(0, 10)) + '</span></div></div>' +
-    '<button class="btn soft sm" data-act="invite-copy" data-id="' + esc(i.code) + '">Copy link</button>' +
-    '<button class="btn soft sm" data-act="invite-revoke" data-id="' + i.id + '">✕</button></div>';
+/**
+ * The one link for the book on screen — named, so it can't be mistaken for
+ * another bank's. What you see here is the whole of what is live: a second
+ * code nobody can see is a grant nobody can take back.
+ */
+function inviteBlock(book: BookSummary, invite: Invite | null): string {
+  if (!invite) {
+    return '<div class="empty"><span class="big">✉️</span>No link yet for ' + esc(book.name) + '.</div>' +
+      '<button class="btn primary wide" style="margin-top:10px" data-act="invite-new">Make an invite link</button>' +
+      '<div class="hint">One link per piggy bank. It opens ' + esc(book.name) + ' and nothing else you keep here.</div>';
+  }
+  return '<div class="field"><label>Send this</label>' +
+    '<input class="input mono" id="inviteUrl" readonly value="' + esc(inviteUrl(invite.code)) + '"></div>' +
+    '<div class="field"><label>Or read out the code</label>' +
+    '<div class="mono" style="font-size:26px;letter-spacing:4px;text-align:center">' + esc(invite.code) + '</div></div>' +
+    '<button class="btn primary wide" data-act="invite-copy" data-id="' + esc(invite.code) + '">Copy link</button>' +
+    '<div class="row-btns" style="margin-top:12px">' +
+    '<button class="btn soft wide" data-act="invite-revoke">Revoke this link</button></div>' +
+    '<div class="hint">Anyone holding this link can join ' + esc(book.name) + ' — and only ' + esc(book.name) + ' — so send it to people you\'d hand your bank statement to. It expires ' + esc(invite.expiresAt.slice(0, 10)) + ', and revoking it shuts the door on anyone who hasn\'t used it yet.</div>';
 }
 
 export async function shareModal(): Promise<void> {
@@ -246,10 +262,10 @@ export async function shareModal(): Promise<void> {
   openModal(head('Share ' + esc(book.name)) + '<div class="empty">Loading…</div>');
 
   let members: Member[] = [];
-  let invites: Invite[] = [];
+  let invite: Invite | null = null;
   try {
     members = await listMembers(book.id);
-    if (book.role === 'owner') invites = await listInvites(book.id);
+    if (book.role === 'owner') invite = await getInvite(book.id);
   } catch (err) {
     closeModal(); toast(message(err)); return;
   }
@@ -259,11 +275,8 @@ export async function shareModal(): Promise<void> {
     <div class="list">${members.map((m) => memberRow(m, S.people)).join('')}</div>
     ${book.role === 'owner' ? `
       <div class="divider"></div>
-      <div class="card-head"><h2>🔗 Invite links</h2></div>
-      ${invites.length ? '<div class="list">' + invites.map(inviteRow).join('') + '</div>'
-        : '<div class="empty"><span class="big">✉️</span>No live invites.</div>'}
-      <button class="btn primary wide" style="margin-top:10px" data-act="invite-new">Make an invite link</button>
-      <div class="hint">Anyone holding the link can join this piggy bank, so send it to people you'd hand your bank statement to. Links last 14 days and you can revoke one at any time.</div>
+      <div class="card-head"><h2>🔗 Invite link for ${esc(book.name)}</h2></div>
+      ${inviteBlock(book, invite)}
     ` : '<div class="hint">Only an owner can invite people to this piggy bank.</div>'}
     <div class="divider"></div>
     <button class="btn danger wide" data-act="book-leave">Leave this piggy bank</button>`);
@@ -274,37 +287,34 @@ export async function makeInvite(): Promise<void> {
   if (!book) return;
   try {
     const invite = await createInvite(book.id);
-    await copyInvite(invite.code);
     await shareModal();
+    await copyInvite(invite.code);
   } catch (err) {
     toast(message(err));
   }
 }
 
 export async function copyInvite(code: string): Promise<void> {
-  const url = inviteUrl(code);
   try {
-    await navigator.clipboard.writeText(url);
+    await navigator.clipboard.writeText(inviteUrl(code));
     toast('Link copied — send it over 🔗');
   } catch {
-    // Clipboard is blocked outside a secure context; show it so it can be
-    // read out or copied by hand.
-    openModal(head('Your invite link') +
-      '<div class="field"><label>Send this</label><input class="input mono" id="inviteUrl" readonly value="' + esc(url) + '"></div>' +
-      '<div class="field"><label>Or read out the code</label><div class="mono" style="font-size:26px;letter-spacing:4px;text-align:center">' + esc(code) + '</div></div>' +
-      '<button class="btn primary wide" data-act="share">Back</button>');
+    // Clipboard is blocked outside a secure context. The share screen already
+    // shows the link in full, so selecting it is all that's left to do.
     const el = $('#inviteUrl') as HTMLInputElement | null;
     if (el) el.select();
+    toast('Copy it by hand — this browser wouldn\'t let us');
   }
 }
 
-export async function killInvite(inviteId: string): Promise<void> {
+export async function killInvite(): Promise<void> {
   const book = session.book;
   if (!book) return;
+  if (!confirm('Revoke the link to ' + book.name + '? Anyone who hasn\'t used it yet will need a new one.')) return;
   try {
-    await revokeInvite(book.id, inviteId);
+    await revokeInvite(book.id);
     await shareModal();
-    toast('Invite revoked');
+    toast('Link revoked');
   } catch (err) {
     toast(message(err));
   }

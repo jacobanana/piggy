@@ -1,6 +1,9 @@
 """Sharing a piggy bank: invites, membership, and two people writing at once."""
 
-from tests.test_auth import make_user, sign_in
+from sqlmodel import select
+
+from identity.models import User
+from tests.test_auth import latest_code, make_user, sign_in
 
 
 def auth(client, session, email: str) -> dict:
@@ -83,8 +86,8 @@ def test_invite_round_trip(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea", "Marc")
 
-    invite = client.post(f"/api/books/{book_id}/invites", headers=lea)
-    assert invite.status_code == 201, invite.text
+    invite = client.post(f"/api/books/{book_id}/invite", headers=lea)
+    assert invite.status_code == 200, invite.text
     code = invite.json()["code"]
 
     marc = auth(client, session, "marc@example.com")
@@ -102,7 +105,7 @@ def test_invite_round_trip(client, session):
 def test_accepting_twice_is_a_no_op(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea")
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
 
     marc = auth(client, session, "marc@example.com")
     client.post(f"/api/invites/{code}/accept", headers=marc)
@@ -115,11 +118,41 @@ def test_accepting_twice_is_a_no_op(client, session):
 def test_revoked_invite_is_refused(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea")
-    invite = client.post(f"/api/books/{book_id}/invites", headers=lea).json()
-    client.delete(f"/api/books/{book_id}/invites/{invite['id']}", headers=lea)
+    invite = client.post(f"/api/books/{book_id}/invite", headers=lea).json()
+    client.delete(f"/api/books/{book_id}/invite", headers=lea)
 
     marc = auth(client, session, "marc@example.com")
     assert client.post(f"/api/invites/{invite['code']}/accept", headers=marc).status_code == 400
+    assert client.get(f"/api/books/{book_id}/invite", headers=lea).json() is None
+
+
+def test_a_book_has_one_link_and_it_is_its_own(client, session):
+    """The share screen shows the link to the bank on screen, and only that."""
+    lea = auth(client, session, "lea@example.com")
+    flat, _ = book_with(client, lea, "Lea", "Marc")
+    trip = client.post("/api/books", json={"name": "Lisbon"}, headers=lea).json()["id"]
+
+    flat_code = client.post(f"/api/books/{flat}/invite", headers=lea).json()["code"]
+    trip_code = client.post(f"/api/books/{trip}/invite", headers=lea).json()["code"]
+    assert flat_code != trip_code
+
+    # Pressing share again hands back the same link rather than quietly
+    # leaving a second live code behind that nobody can see or revoke.
+    assert client.post(f"/api/books/{flat}/invite", headers=lea).json()["code"] == flat_code
+    assert client.get(f"/api/books/{flat}/invite", headers=lea).json()["code"] == flat_code
+    assert client.get(f"/api/books/{trip}/invite", headers=lea).json()["code"] == trip_code
+
+    # And the link opens the bank it was made for, not the other one.
+    marc = auth(client, session, "marc@example.com")
+    joined = client.post(f"/api/invites/{trip_code}/accept", headers=marc).json()
+    assert joined["id"] == trip
+    assert {b["id"] for b in client.get("/api/books", headers=marc).json()} == {trip}
+
+
+def test_a_book_with_no_link_yet_has_none(client, session):
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea")
+    assert client.get(f"/api/books/{book_id}/invite", headers=lea).json() is None
 
 
 def test_non_member_cannot_see_a_book(client, session):
@@ -134,17 +167,17 @@ def test_non_member_cannot_see_a_book(client, session):
 def test_member_cannot_mint_invites(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea")
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
     marc = auth(client, session, "marc@example.com")
     client.post(f"/api/invites/{code}/accept", headers=marc)
 
-    assert client.post(f"/api/books/{book_id}/invites", headers=marc).status_code == 403
+    assert client.post(f"/api/books/{book_id}/invite", headers=marc).status_code == 403
 
 
 def test_claiming_a_person_links_the_account(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea", "Marc")
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
     marc = auth(client, session, "marc@example.com")
     client.post(f"/api/invites/{code}/accept", headers=marc)
 
@@ -157,7 +190,7 @@ def test_two_people_cannot_claim_the_same_person(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea", "Marc")
     client.put(f"/api/books/{book_id}/members/me/person", json={"personId": "per_marc"}, headers=lea)
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
     marc = auth(client, session, "marc@example.com")
     client.post(f"/api/invites/{code}/accept", headers=marc)
 
@@ -169,7 +202,7 @@ def test_concurrent_edits_both_survive(client, session):
     """The whole reason the merge exists: nobody's expense disappears."""
     lea = auth(client, session, "lea@example.com")
     book_id, state = book_with(client, lea, "Lea", "Marc")
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
     marc = auth(client, session, "marc@example.com")
     client.post(f"/api/invites/{code}/accept", headers=marc)
 
@@ -219,7 +252,7 @@ def test_a_write_with_no_if_match_still_works(client, session):
 def test_a_member_can_leave(client, session):
     lea = auth(client, session, "lea@example.com")
     book_id, _ = book_with(client, lea, "Lea")
-    code = client.post(f"/api/books/{book_id}/invites", headers=lea).json()["code"]
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
     marc = auth(client, session, "marc@example.com")
     marc_id = client.post(f"/api/invites/{code}/accept", headers=marc)
     assert marc_id.status_code == 200
@@ -235,3 +268,51 @@ def test_the_last_owner_cannot_be_removed(client, session):
     me = client.get(f"/api/books/{book_id}/members", headers=lea).json()[0]
 
     assert client.delete(f"/api/books/{book_id}/members/{me['userId']}", headers=lea).status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Arriving on a link with no account yet
+# --------------------------------------------------------------------------
+
+
+def test_an_invite_code_is_a_front_door_for_somebody_with_no_account(client, session):
+    """The whole point of a link: hand it to someone who has never been here."""
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea", "Marc")
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
+
+    claim = client.post(f"/api/invites/{code}/claim", json={"email": "marc@example.com"})
+    assert claim.status_code == 202, claim.text
+
+    verification_id, login_code = latest_code(session, "marc@example.com")
+    assert verification_id == claim.json()["verification_id"]
+    tokens = client.post("/api/auth/code/verify", json={"verification_id": verification_id, "code": login_code})
+    assert tokens.status_code == 200, tokens.text
+
+    marc = {"Authorization": f"Bearer {tokens.json()['access_token']}"}
+    joined = client.post(f"/api/invites/{code}/accept", headers=marc)
+    assert joined.status_code == 200
+    assert joined.json()["id"] == book_id
+
+
+def test_claiming_an_existing_account_does_not_make_a_second(client, session):
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea")
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
+    make_user(session, email="marc@example.com")
+
+    assert client.post(f"/api/invites/{code}/claim", json={"email": "marc@example.com"}).status_code == 202
+    marcs = session.exec(select(User).where(User.email == "marc@example.com")).all()
+    assert len(marcs) == 1
+
+
+def test_no_code_no_account(client, session):
+    """Without a live code there is no sign-up — the only gate there is."""
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea")
+    invite = client.post(f"/api/books/{book_id}/invite", headers=lea).json()
+
+    assert client.post("/api/invites/NOSUCH12/claim", json={"email": "nosy@example.com"}).status_code == 404
+    client.delete(f"/api/books/{book_id}/invite", headers=lea)
+    assert client.post(f"/api/invites/{invite['code']}/claim", json={"email": "nosy@example.com"}).status_code == 400
+    assert session.exec(select(User).where(User.email == "nosy@example.com")).first() is None
