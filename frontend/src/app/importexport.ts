@@ -3,7 +3,7 @@ import { S, UI, baseCur, person, save, setState, accountLabel, toBase } from './
 import { commit } from './render';
 import { closeModal, settingsModal, toast } from './modals';
 import { itemsInScope } from '../domain/selectors';
-import { settlementsInScope } from '../domain/balances';
+import { settlementsFor } from '../domain/balances';
 import { r2, todayISO } from '../lib/utils';
 import type { AppState } from '../model/types';
 
@@ -31,7 +31,7 @@ export function exportCSV(): void {
         accountLabel(it.accountId), it.method || '', sp.mode || 'equal',
         (sp.participants && sp.participants.length ? sp.participants : S.people.map((p) => p.id)).map((i) => person(i)?.name || '').join('+')]);
     });
-    settlementsInScope(S, l.id, null).forEach((s) => {
+    settlementsFor(S, l.id).forEach((s) => {
       rows.push([l.name, 'repayment', s.date, s.note || 'Repayment', r2(s.amount), s.currency,
         toBase(s.amount, s.currency, s.fxRate), person(s.fromPersonId)?.name || '', s.method || '', '',
         person(s.toPersonId)?.name || '']);

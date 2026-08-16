@@ -11,14 +11,14 @@ import { store } from '../storage/store';
 import { thisMonth } from '../lib/utils';
 import { rateOf as fxRateOf, toBase as fxToBase } from '../domain/fx';
 
+/** `month` scopes the expense lists only — the tally always spans the ledger. */
 export interface UIState {
   ledgerId: string | null;
   month: string;
-  scope: 'month' | 'all';
 }
 
 export let S: AppState = blankState();
-export const UI: UIState = { ledgerId: null, month: thisMonth(), scope: 'month' };
+export const UI: UIState = { ledgerId: null, month: thisMonth() };
 
 export function setState(next: AppState): void { S = next; }
 

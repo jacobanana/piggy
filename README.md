@@ -1,9 +1,9 @@
 # 🐷 Piggy
 
 Shared expenses for two — recurring bills, everyday extras, things booked but
-not yet paid, and holiday pots, split evenly, by shares or to the cent, with a
-receipt tallying who owes whom and an itemised log of every repayment between
-you. Multi-currency, with its own exchange rates.
+not yet paid, and holiday pots, split evenly, by shares or to the cent, with one
+running receipt tallying who owes whom across every month and an itemised log of
+every repayment between you. Multi-currency, with its own exchange rates.
 
 **Live (frontend-only):** https://jacobanana.github.io/piggy/
 Everything stays in your browser's localStorage; export/import JSON any time.

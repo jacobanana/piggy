@@ -1,8 +1,18 @@
+/**
+ * The tally: who owes whom, across the whole ledger.
+ *
+ * Expenses belong to a month; the tally never does. Somebody paying on the
+ * 28th of July for August's rent is settling a real debt, and a tally that
+ * reset every month would either lose that money or count it twice. So the
+ * balance, what each side has paid, and the repayment log all run from the
+ * first entry to the last — only `categoryTotals` below, which describes one
+ * month's spending rather than the debt between people, takes a month.
+ */
 import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types';
 import { itemsInScope } from './selectors';
 import { splitCents } from './splits';
 import { toBase } from './fx';
-import { cents, monthOf } from '../lib/utils';
+import { cents } from '../lib/utils';
 
 /**
  * What one item alone does to each person's balance, in base-currency cents.
@@ -35,22 +45,22 @@ export function pairwiseDebt(s: AppState, it: LedgerItem, from: string, to: stri
 }
 
 /**
- * Net position per person, in base-currency cents.
+ * Net position per person over the whole ledger, in base-currency cents.
  * Positive: the others owe them. Paying from an account credits its owners
  * by ownership share; each item's split debits whoever it was for;
- * settlements move the tally back towards zero.
+ * repayments move the tally back towards zero whichever month they landed in.
  */
-export function computeBalances(s: AppState, ledgerId: string, monthKey: MonthKey | null): Record<string, number> {
+export function computeBalances(s: AppState, ledgerId: string): Record<string, number> {
   const bal: Record<string, number> = {};
   s.people.forEach((p) => { bal[p.id] = 0; });
   const ids = s.people.map((p) => p.id);
 
-  itemsInScope(s, ledgerId, monthKey).forEach((it) => {
+  itemsInScope(s, ledgerId, null).forEach((it) => {
     Object.entries(itemDeltas(s, it, ids)).forEach(([pid, c]) => { bal[pid] += c; });
   });
 
   s.settlements
-    .filter((x) => x.ledgerId === ledgerId && (!monthKey || monthOf(x.date) === monthKey))
+    .filter((x) => x.ledgerId === ledgerId)
     .forEach((x) => {
       const c = cents(toBase(s.settings.rates, x.amount, x.currency, x.fxRate));
       if (bal[x.fromPersonId] != null) bal[x.fromPersonId] += c;
@@ -84,11 +94,11 @@ export function simplifyDebts(bal: Record<string, number>): { from: string; to: 
   return out;
 }
 
-/** Base-currency cents each person's accounts actually paid out. */
-export function paidByTotals(s: AppState, ledgerId: string, monthKey: MonthKey | null): Record<string, number> {
+/** Base-currency cents each person's accounts have paid out, all told. */
+export function paidByTotals(s: AppState, ledgerId: string): Record<string, number> {
   const out: Record<string, number> = {};
   s.people.forEach((p) => { out[p.id] = 0; });
-  itemsInScope(s, ledgerId, monthKey).forEach((it) => {
+  itemsInScope(s, ledgerId, null).forEach((it) => {
     const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
     const acc = s.accounts.find((a) => a.id === it.accountId);
     if (acc) {
@@ -101,10 +111,10 @@ export function paidByTotals(s: AppState, ledgerId: string, monthKey: MonthKey |
   return out;
 }
 
-/** Repayments in scope, newest first. */
-export function settlementsInScope(s: AppState, ledgerId: string, monthKey: MonthKey | null): Settlement[] {
+/** Every repayment in the ledger, newest first — one list, not one a month. */
+export function settlementsFor(s: AppState, ledgerId: string): Settlement[] {
   return s.settlements
-    .filter((x) => x.ledgerId === ledgerId && (!monthKey || monthOf(x.date) === monthKey))
+    .filter((x) => x.ledgerId === ledgerId)
     .sort((a, b) => (a.date === b.date
       ? (b.createdAt || '').localeCompare(a.createdAt || '')
       : a.date < b.date ? 1 : -1));
