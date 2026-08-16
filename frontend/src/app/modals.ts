@@ -1,20 +1,25 @@
 /** Modal forms and their save handlers. Transient form state lives in F. */
-import type { Account, Expense, Ledger, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
+import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
 import { onServer, session } from './session';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
-import { $, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, simplifyDebts } from '../domain/balances';
+import { $, dayLabel, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
+import { computeBalances, pairwiseDebt, simplifyDebts } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
-import { overrideOf } from '../domain/selectors';
+import { itemsInScope, overrideOf } from '../domain/selectors';
 
 /** Transient form state (emoji + split being edited, etc.). Cleared on close. */
 export const F: {
   emoji?: string; color?: string; kind?: string; own?: Record<string, number>;
   method?: string; planned?: boolean; skip?: boolean; active?: boolean;
   split?: { mode: SplitMode; participants: string[]; values: Record<string, number | string> };
+  /** Ledger items a repayment is being logged against, in the order ticked. */
+  items?: string[];
+  /** The amount the repayment form opened with, and the last one it filled in
+      by itself — the pair is how a hand-typed override is recognised. */
+  openAmount?: string; autoAmount?: string;
 } = {};
 
 function clearF(): void { (Object.keys(F) as (keyof typeof F)[]).forEach((k) => delete F[k]); }
@@ -379,6 +384,109 @@ export const lastPayMethod = (): string => S.settings.lastPayMethod || 'cash';
 function personOptions(sel?: string): string {
   return S.people.map((p) => '<option value="' + p.id + '" ' + (p.id === sel ? 'selected' : '') + '>' + esc(p.emoji + ' ' + p.name) + '</option>').join('');
 }
+/* ---------- what a repayment is for ---------- */
+
+/** Beyond this the picker would be a wall of rows, so it stops and says so. */
+const PICK_LIMIT = 40;
+
+/** Everything in the ledger that ever cost money, whatever month it fell in. */
+const everyItem = (): LedgerItem[] => itemsInScope(S, activeLedger()!.id, null);
+
+/**
+ * Items worth offering for a repayment from -> to, newest first, each with
+ * what it alone makes `from` owe `to`.
+ */
+function pickable(from: string, to: string): { it: LedgerItem; owed: number }[] {
+  const l = activeLedger()!;
+  const scope = l.kind === 'trip' ? null : UI.scope === 'all' ? null : UI.month;
+  const inScope = new Set(itemsInScope(S, l.id, scope).map((it) => it.id));
+  const picked = F.items || [];
+  return everyItem()
+    .map((it) => ({ it, owed: pairwiseDebt(S, it, from, to) }))
+    /* Something already ticked stays listed even once it is out of scope or
+       square, so editing an old repayment never silently drops it. */
+    .filter((c) => picked.includes(c.it.id) || (inScope.has(c.it.id) && c.owed > 0))
+    .sort((a, b) => (a.it.date === b.it.date ? 0 : a.it.date < b.it.date ? 1 : -1));
+}
+
+export function pickBox(from: string, to: string): string {
+  const all = pickable(from, to);
+  if (!all.length) {
+    return '<div class="hint" style="margin-top:0">Nothing outstanding between these two right now — just put the amount in below.</div>';
+  }
+  const picked = F.items || [];
+  const rows = all.slice(0, PICK_LIMIT).map(({ it, owed }) => {
+    const on = picked.includes(it.id);
+    return '<div class="item ' + (on ? 'on' : '') + '" data-act="pick-item" data-id="' + esc(it.id) + '">' +
+      '<span class="tick">' + (on ? '✓' : '') + '</span>' +
+      '<div class="emo">' + esc(it.emoji) + '</div>' +
+      '<div class="item-main"><div class="name">' + esc(it.name) + '</div>' +
+      '<div class="meta"><span>' + dayLabel(it.date) + '</span><span>·</span><span>of ' + money2(it.amount, it.currency) + '</span>' +
+      (it.kind === 'recurring' ? '<span class="tag">bill</span>' : '') + '</div></div>' +
+      '<div class="amount">' + money2(fromCents(owed), baseCur()) + '</div></div>';
+  }).join('');
+  return '<div class="picklist">' + rows + '</div>' +
+    (all.length > PICK_LIMIT ? '<div class="hint">Showing the ' + PICK_LIMIT + ' most recent of ' + all.length + '.</div>' : '');
+}
+
+const settleFrom = (): string => ($('#sFrom') as HTMLSelectElement | null)?.value || '';
+const settleTo = (): string => ($('#sTo') as HTMLSelectElement | null)?.value || '';
+
+/** What the ticked items come to, in base-currency cents. */
+function pickedCents(): number {
+  const picked = F.items || [];
+  if (!picked.length) return 0;
+  const from = settleFrom(), to = settleTo();
+  const byId = new Map(everyItem().map((it) => [it.id, it]));
+  return picked.reduce((sum, id) => {
+    const it = byId.get(id);
+    return sum + (it ? pairwiseDebt(S, it, from, to) : 0);
+  }, 0);
+}
+
+/** The same total in whatever currency the form is showing. */
+function pickedAmountStr(): string {
+  if (!(F.items || []).length) return F.openAmount || '';
+  const cur = ($('#fCur') as HTMLSelectElement).value;
+  const rate = cur === baseCur() ? 1 : readRate();
+  return r2(fromCents(pickedCents()) / (rate || 1)).toFixed(2);
+}
+
+/**
+ * Push the ticked total into the amount box — unless the amount has been
+ * typed over, which is the whole point of being able to repay part of
+ * something. `force` is the "use the total" escape hatch.
+ */
+export function syncPickedAmount(force?: boolean): void {
+  const inp = $('#fAmount') as HTMLInputElement | null;
+  if (!inp) return;
+  const want = pickedAmountStr();
+  const overridden = !force && F.autoAmount != null && inp.value.trim() !== F.autoAmount;
+  if (!overridden) { inp.value = want; F.autoAmount = want; }
+
+  const hint = $('#pickHint');
+  if (!hint) return;
+  const n = (F.items || []).length;
+  hint.style.display = n ? '' : 'none';
+  if (!n) { hint.innerHTML = ''; return; }
+  const total = money2(fromCents(pickedCents()), baseCur());
+  hint.innerHTML = n + (n === 1 ? ' item' : ' items') + ' ticked · ' + total + ' owed' +
+    (overridden
+      ? ' — logging a different amount. <button type="button" class="linkish" data-act="use-picked-total">Use the total</button>'
+      : '. Type over the amount for a part payment.');
+}
+
+/** Redraw the picker after the people (and so the direction) changed. */
+export function refreshPickBox(): void {
+  const box = $('#pickBox');
+  if (!box) return;
+  const from = settleFrom(), to = settleTo();
+  const still = new Set(pickable(from, to).filter((c) => c.owed > 0).map((c) => c.it.id));
+  F.items = (F.items || []).filter((id) => still.has(id));
+  box.innerHTML = pickBox(from, to);
+  syncPickedAmount(true);
+}
+
 export function settlementForm(st?: Settlement | null, prefill?: { from?: string; to?: string; amount?: number | null; method?: string }): void {
   const l = activeLedger()!;
   const isNew = !st;
@@ -392,6 +500,10 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
     date: l.kind === 'trip' ? clampToTrip(l) : defaultDate(), note: '',
   };
   F.method = x.method || lastPayMethod();
+  F.items = (st && st.itemIds ? st.itemIds.slice() : []);
+  const openAmount = x.amount != null ? String(x.amount) : '';
+  F.openAmount = openAmount;
+  F.autoAmount = openAmount;
   openModal(head(isNew ? 'Log a repayment' : 'Edit repayment') + `
     <div class="sub" style="margin:-8px 0 14px">Money one of you actually handed over — cash, a transfer, a Twint. It cancels out against the tally rather than changing any expense.</div>
     <div class="two">
@@ -399,7 +511,12 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
       <div class="field"><label>Who got it</label><select class="input" id="sTo">${personOptions(x.toPersonId)}</select></div>
     </div>
     <button class="btn soft sm" data-act="swap-settle" style="margin:-4px 0 12px">⇄ Swap</button>
+    <div class="field"><label>What's it for? (optional)</label>
+      <div id="pickBox">${pickBox(x.fromPersonId!, x.toPersonId!)}</div>
+      <div class="hint">Tick whatever this repayment covers and the amount fills itself in. Each line is that person's share, not the whole bill.</div>
+    </div>
     ${moneyFields(x.amount, x.currency!, x.fxRate)}
+    <div class="hint" id="pickHint" style="display:none;margin:-6px 0 13px"></div>
     <div class="field"><label>How it travelled</label>${payMethodChips(F.method!)}</div>
     <div class="field"><label>When</label><input class="input" id="sDate" type="date" value="${x.date}"></div>
     <div class="field"><label>Note (optional)</label><input class="input" id="sNote" value="${esc(x.note || '')}" placeholder="Cash at the station"></div>
@@ -408,7 +525,15 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
       ${x.id ? '<button class="btn danger" data-act="del-settle" data-id="' + x.id + '">Delete</button>' : ''}
     </div>
     ${x.id ? '<div class="hint">Deleting puts the amount back on the tally, as if the money had never moved.</div>' : ''}
-  `, wireMoney);
+  `, () => {
+    wireMoney();
+    /* Registered after wireMoney's own handler, so the rate it sets for the
+       new currency is already in place when the ticked total is reconverted. */
+    $('#fCur')!.addEventListener('change', () => syncPickedAmount());
+    $('#sFrom')!.addEventListener('change', refreshPickBox);
+    $('#sTo')!.addEventListener('change', refreshPickBox);
+    syncPickedAmount();
+  });
 }
 export function saveSettlement(id?: string): void {
   const l = activeLedger()!;
@@ -421,6 +546,7 @@ export function saveSettlement(id?: string): void {
     fromPersonId: from, toPersonId: to,
     amount, currency: ($('#fCur') as HTMLSelectElement).value, fxRate: readRate(),
     method: F.method || lastPayMethod(), note: ($('#sNote') as HTMLInputElement).value.trim(),
+    itemIds: (F.items || []).slice(),
   };
   S.settings.lastPayMethod = data.method;
   if (id) {

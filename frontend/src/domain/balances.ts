@@ -1,8 +1,38 @@
-import type { AppState, MonthKey, Settlement } from '../model/types';
+import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types';
 import { itemsInScope } from './selectors';
 import { splitCents } from './splits';
 import { toBase } from './fx';
 import { cents, monthOf } from '../lib/utils';
+
+/**
+ * What one item alone does to each person's balance, in base-currency cents.
+ * Left unrounded: callers that sum many items round once at the end.
+ */
+function itemDeltas(s: AppState, it: LedgerItem, ids: string[]): Record<string, number> {
+  const d: Record<string, number> = {};
+  ids.forEach((id) => { d[id] = 0; });
+  const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
+  const acc = s.accounts.find((a) => a.id === it.accountId);
+  if (acc) {
+    Object.entries(acc.ownership).forEach(([pid, share]) => {
+      if (d[pid] != null) d[pid] += tc * Number(share);
+    });
+  }
+  const owed = splitCents(it.split, tc, ids);
+  Object.entries(owed).forEach(([pid, c]) => { if (d[pid] != null) d[pid] -= c; });
+  return d;
+}
+
+/**
+ * What this one item makes `from` owe `to`, in base-currency cents — the
+ * amount to repay if you were settling that item and nothing else. Never
+ * negative: an item that leaves `from` in credit owes nothing.
+ */
+export function pairwiseDebt(s: AppState, it: LedgerItem, from: string, to: string): number {
+  if (from === to) return 0;
+  const d = itemDeltas(s, it, s.people.map((p) => p.id));
+  return Math.max(0, Math.round(Math.min(-(d[from] || 0), d[to] || 0)));
+}
 
 /**
  * Net position per person, in base-currency cents.
@@ -16,15 +46,7 @@ export function computeBalances(s: AppState, ledgerId: string, monthKey: MonthKe
   const ids = s.people.map((p) => p.id);
 
   itemsInScope(s, ledgerId, monthKey).forEach((it) => {
-    const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
-    const acc = s.accounts.find((a) => a.id === it.accountId);
-    if (acc) {
-      Object.entries(acc.ownership).forEach(([pid, share]) => {
-        if (bal[pid] != null) bal[pid] += tc * Number(share);
-      });
-    }
-    const owed = splitCents(it.split, tc, ids);
-    Object.entries(owed).forEach(([pid, c]) => { if (bal[pid] != null) bal[pid] -= c; });
+    Object.entries(itemDeltas(s, it, ids)).forEach(([pid, c]) => { bal[pid] += c; });
   });
 
   s.settlements

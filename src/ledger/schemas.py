@@ -114,6 +114,8 @@ class SettlementState(BaseModel):
     fxRate: float | None = None
     method: str = "cash"
     note: str = ""
+    # Expense ids, or "ruleId|YYYY-MM" for one month of a recurring bill.
+    itemIds: list[str] = Field(default_factory=list)
     createdAt: str | None = None
 
 

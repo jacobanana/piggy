@@ -3,9 +3,9 @@ import { S, UI, account, activeLedger, ledger, person, rule, save } from './cont
 import { addOnboardSlot, commit, render } from './render';
 import {
   F, accountForm, addChooser, closeModal, doSettle, expenseForm, ledgerForm, occurrenceModal,
-  onboard, personForm, refreshSplit, ruleForm, rulesModal, saveAccount, saveExpense, saveLedger,
-  saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal, settleModal,
-  settlementForm, toast,
+  onboard, personForm, refreshPickBox, refreshSplit, ruleForm, rulesModal, saveAccount, saveExpense,
+  saveLedger, saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal,
+  settleModal, settlementForm, syncPickedAmount, toast,
 } from './modals';
 import { backToEmail, doSignOut, sendCode, submitCode } from './auth';
 import {
@@ -157,8 +157,19 @@ export function wireEvents(): void {
         return;
       case 'swap-settle': {
         const f = $('#sFrom') as HTMLSelectElement, t = $('#sTo') as HTMLSelectElement;
-        const val = f.value; f.value = t.value; t.value = val; return;
+        const val = f.value; f.value = t.value; t.value = val;
+        refreshPickBox(); return;
       }
+      case 'pick-item': {
+        const picked = F.items || (F.items = []);
+        const i = picked.indexOf(id);
+        if (i >= 0) picked.splice(i, 1); else picked.push(id);
+        el.classList.toggle('on', i < 0);
+        const tick = el.querySelector('.tick');
+        if (tick) tick.textContent = i < 0 ? '✓' : '';
+        syncPickedAmount(); return;
+      }
+      case 'use-picked-total': syncPickedAmount(true); return;
       case 'new-person': personForm(); return;
       case 'edit-person': personForm(person(id)); return;
       case 'save-person': savePerson(id || undefined); return;
@@ -210,6 +221,9 @@ export function wireEvents(): void {
   });
 
   document.addEventListener('input', (e) => {
+    /* Typing over a prefilled repayment turns it into a part payment, so the
+       ticked total has to be re-stated rather than silently disagreed with. */
+    if ((e.target as HTMLElement).id === 'fAmount' && $('#pickHint')) syncPickedAmount();
     const el = (e.target as HTMLElement).closest<HTMLInputElement>('[data-act]');
     if (!el) return;
     if (el.dataset.act === 'split-val') F.split!.values[el.dataset.id!] = el.value;

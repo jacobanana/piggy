@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, simplifyDebts } from './balances';
+import { computeBalances, pairwiseDebt, simplifyDebts } from './balances';
 import { blankState } from '../model/state';
 import type { AppState, Expense, Settlement } from '../model/types';
 
@@ -80,6 +80,47 @@ describe('computeBalances', () => {
     s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02' })];
     expect(computeBalances(s, 'home', '2025-03').marc).toBe(-5000);
     expect(computeBalances(s, 'home', null).marc).toBe(-10000);
+  });
+});
+
+describe('pairwiseDebt', () => {
+  const item = (over: Partial<Expense>) => ({ ...expense(over), kind: 'adhoc' as const });
+
+  it('is the other side\'s share of an expense one person paid', () => {
+    const s = fixture();
+    expect(pairwiseDebt(s, item({}), 'marc', 'lea')).toBe(5000);
+  });
+
+  it('owes nothing back the other way', () => {
+    const s = fixture();
+    expect(pairwiseDebt(s, item({}), 'lea', 'marc')).toBe(0);
+  });
+
+  it('follows the split rather than the total', () => {
+    const s = fixture();
+    const it = item({ split: { mode: 'shares', participants: ['lea', 'marc'], values: { lea: 3, marc: 1 } } });
+    expect(pairwiseDebt(s, it, 'marc', 'lea')).toBe(2500);
+  });
+
+  it('is nil when a joint account paid an even split', () => {
+    const s = fixture();
+    expect(pairwiseDebt(s, item({ accountId: 'acc-joint' }), 'marc', 'lea')).toBe(0);
+  });
+
+  it('converts through the snapshotted rate', () => {
+    const s = fixture();
+    expect(pairwiseDebt(s, item({ amount: 100, currency: 'EUR', fxRate: 0.9 }), 'marc', 'lea')).toBe(4500);
+  });
+
+  it('adds up to the tally over a month of items', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', accountId: 'acc-marc', amount: 40 })];
+    const owed = s.expenses.reduce(
+      (sum, e) => sum + pairwiseDebt(s, { ...e, kind: 'adhoc' }, 'marc', 'lea')
+        - pairwiseDebt(s, { ...e, kind: 'adhoc' }, 'lea', 'marc'),
+      0,
+    );
+    expect(owed).toBe(-computeBalances(s, 'home', '2025-03').marc);
   });
 });
 

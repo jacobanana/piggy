@@ -128,6 +128,7 @@ SAMPLE_BOOK = {
             "fxRate": 1.0,
             "method": "twint",
             "note": "Settle up",
+            "itemIds": ["exp_1", "rule_rent|2025-03"],
         },
     ],
 }
@@ -187,7 +188,24 @@ def test_put_then_get_round_trips(client, session):
     hotel = next(e for e in got["expenses"] if e["id"] == "exp_2")
     assert hotel["planned"] is True
 
-    assert got["settlements"][0]["fromPersonId"] == "per_marc"
+    settlement = got["settlements"][0]
+    assert settlement["fromPersonId"] == "per_marc"
+    # What the repayment was for survives, in the order it was picked — an
+    # expense id and one month of a recurring bill.
+    assert settlement["itemIds"] == ["exp_1", "rule_rent|2025-03"]
+
+
+def test_a_repayment_can_stand_alone(client, session):
+    """itemIds is optional: a book saved before the picker existed still loads."""
+    headers = auth_headers(client, session)
+    loose = {
+        **SAMPLE_BOOK,
+        "settlements": [{k: v for k, v in SAMPLE_BOOK["settlements"][0].items() if k != "itemIds"}],
+    }
+    assert client.put("/api/book", json=loose, headers=headers).status_code == 200
+
+    got = client.get("/api/book", headers=headers).json()
+    assert got["settlements"][0]["itemIds"] == []
 
 
 def test_put_replaces_rather_than_merges(client, session):

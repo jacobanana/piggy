@@ -31,6 +31,7 @@ from core.utils import utcnow
 ID_LENGTH = 64  # client-generated opaque id
 CURRENCY_LENGTH = 3
 MONTH_LENGTH = 7  # "YYYY-MM"
+ITEM_REF_LENGTH = ID_LENGTH + MONTH_LENGTH + 1  # an id, or "ruleId|YYYY-MM"
 
 
 def varchar_enum(enum_cls: type[enum.Enum], **kwargs: Any) -> Any:
@@ -303,3 +304,21 @@ class Settlement(SQLModel, table=True):
     method: str = Field(max_length=20)
     note: str = Field(default="", max_length=1000)
     created_at: datetime = utc_datetime_field(default_factory=utcnow)
+
+
+class SettlementItem(SQLModel, table=True):
+    """What a repayment was for — one row per item it was logged against.
+
+    `item_id` is an expense id, or `ruleId|YYYY-MM` for one month of a
+    recurring bill; occurrences are computed rather than stored, so this
+    deliberately carries no foreign key. A record of intent only: the tally
+    moves by the settlement's amount, which may be a part of what these come
+    to, or more.
+    """
+
+    __tablename__ = "settlement_items"
+
+    settlement_id: str = Field(foreign_key="settlements.id", primary_key=True, max_length=ID_LENGTH)
+    item_id: str = Field(primary_key=True, max_length=ITEM_REF_LENGTH)
+    # Kept so the picker hands them back in the order they were ticked.
+    position: int = Field(default=0)
