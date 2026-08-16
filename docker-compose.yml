@@ -1,0 +1,69 @@
+# Development stack — run the whole thing on your computer:
+#
+#   cp .env.example .env        (optional; every value has a dev default)
+#   docker compose up --build
+#
+# Postgres on :5432, Adminer on :8080, and the backend on :8000 serving both
+# the API and the built frontend — same-origin, like production.
+# For frontend hot reload, use `make dev` instead (Vite on :5173 + uvicorn).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: piggy-db-dev
+    environment:
+      # Safe for local development only.
+      POSTGRES_DB: ${POSTGRES_DB:-piggy}
+      POSTGRES_USER: ${POSTGRES_USER:-piggy_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-piggy_dev_password}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-piggy_user} -d ${POSTGRES_DB:-piggy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  adminer:
+    image: adminer:latest
+    container_name: piggy-adminer-dev
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      target: app
+    container_name: piggy-backend-dev
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://piggy_user:piggy_dev_password@postgres:5432/piggy}
+      - ENVIRONMENT=development
+      # Same-origin like production: CORS points at the backend itself.
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8000}
+      - DEV_AUTH_ENABLED=${DEV_AUTH_ENABLED:-true}
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn api:app --app-dir src --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  postgres_data:
+    driver: local

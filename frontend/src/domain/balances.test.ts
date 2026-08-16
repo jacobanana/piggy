@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest';
+import { computeBalances, simplifyDebts } from './balances';
+import { blankState } from '../model/state';
+import type { AppState, Expense, Settlement } from '../model/types';
+
+/** Two people, personal accounts, and a 50/50 joint account. */
+function fixture(): AppState {
+  const s = blankState();
+  s.people = [
+    { id: 'lea', name: 'Léa', emoji: '🐰', color: '#111' },
+    { id: 'marc', name: 'Marc', emoji: '🦊', color: '#222' },
+  ];
+  s.accounts = [
+    { id: 'acc-lea', name: "Léa's money", kind: 'personal', ownership: { lea: 1 } },
+    { id: 'acc-marc', name: "Marc's money", kind: 'personal', ownership: { marc: 1 } },
+    { id: 'acc-joint', name: 'Joint', kind: 'joint', ownership: { lea: 0.5, marc: 0.5 } },
+  ];
+  s.ledgers = [{
+    id: 'home', name: 'Home', emoji: '🏠', kind: 'household', currency: 'CHF',
+    archived: false, createdAt: '2025-01-01T00:00:00Z',
+  }];
+  return s;
+}
+
+const expense = (over: Partial<Expense>): Expense => ({
+  id: 'e1', ledgerId: 'home', name: 'Groceries', emoji: '🛒', amount: 100, currency: 'CHF',
+  fxRate: 1, date: '2025-03-10', accountId: 'acc-lea', method: 'card', planned: false,
+  split: { mode: 'equal', participants: [], values: {} }, notes: '', createdAt: '2025-03-10T00:00:00Z',
+  ...over,
+});
+
+describe('computeBalances', () => {
+  it('credits the payer and debits everyone their share', () => {
+    const s = fixture();
+    s.expenses = [expense({})];   // Léa pays 100, split evenly
+    const bal = computeBalances(s, 'home', '2025-03');
+    expect(bal.lea).toBe(5000);   // paid 10000, owes 5000
+    expect(bal.marc).toBe(-5000);
+  });
+
+  it('keeps joint-account spending square when split evenly', () => {
+    const s = fixture();
+    s.expenses = [expense({ accountId: 'acc-joint' })];
+    const bal = computeBalances(s, 'home', '2025-03');
+    expect(bal.lea).toBe(0);
+    expect(bal.marc).toBe(0);
+  });
+
+  it('leaves planned expenses out of the tally', () => {
+    const s = fixture();
+    s.expenses = [expense({ planned: true })];
+    const bal = computeBalances(s, 'home', '2025-03');
+    expect(bal.lea).toBe(0);
+    expect(bal.marc).toBe(0);
+  });
+
+  it('converts foreign amounts through the snapshotted rate', () => {
+    const s = fixture();
+    s.expenses = [expense({ amount: 100, currency: 'EUR', fxRate: 0.9 })];
+    const bal = computeBalances(s, 'home', '2025-03');
+    expect(bal.lea).toBe(4500);
+    expect(bal.marc).toBe(-4500);
+  });
+
+  it('cancels debts with settlements', () => {
+    const s = fixture();
+    s.expenses = [expense({})];
+    const st: Settlement = {
+      id: 's1', ledgerId: 'home', date: '2025-03-15', fromPersonId: 'marc', toPersonId: 'lea',
+      amount: 50, currency: 'CHF', fxRate: 1, method: 'cash', note: '', createdAt: '2025-03-15T00:00:00Z',
+    };
+    s.settlements = [st];
+    const bal = computeBalances(s, 'home', '2025-03');
+    expect(bal.lea).toBe(0);
+    expect(bal.marc).toBe(0);
+  });
+
+  it('scopes to a month, or everything when monthKey is null', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02' })];
+    expect(computeBalances(s, 'home', '2025-03').marc).toBe(-5000);
+    expect(computeBalances(s, 'home', null).marc).toBe(-10000);
+  });
+});
+
+describe('simplifyDebts', () => {
+  it('produces one transfer for a two-person imbalance', () => {
+    expect(simplifyDebts({ lea: 5000, marc: -5000 }))
+      .toEqual([{ from: 'marc', to: 'lea', cents: 5000 }]);
+  });
+
+  it('ignores sub-cent noise', () => {
+    expect(simplifyDebts({ lea: 1, marc: -1 })).toEqual([]);
+  });
+
+  it('settles three people with the fewest transfers', () => {
+    const out = simplifyDebts({ a: 6000, b: -4000, c: -2000 });
+    expect(out).toEqual([
+      { from: 'b', to: 'a', cents: 4000 },
+      { from: 'c', to: 'a', cents: 2000 },
+    ]);
+  });
+});

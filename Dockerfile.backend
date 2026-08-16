@@ -1,0 +1,33 @@
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS backend
+
+WORKDIR /app
+
+# Copy project files (src layout needs the sources for uv sync to build)
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+
+RUN uv sync --frozen --no-dev
+
+# Put the baked venv on PATH so runtime commands (uvicorn, alembic, manage)
+# run directly without `uv run`, which would re-sync on every container start.
+ENV PATH="/app/.venv/bin:$PATH"
+
+COPY alembic ./alembic
+COPY alembic.ini ./
+
+EXPOSE 8000
+CMD ["uvicorn", "api:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8000"]
+
+# ---------------------------------------------------------------------------
+# Production image: backend + built SPA served by FastAPI.
+# ---------------------------------------------------------------------------
+
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+FROM backend AS app
+COPY --from=frontend-builder /app/dist ./frontend/dist

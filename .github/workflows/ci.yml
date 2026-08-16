@@ -1,0 +1,16 @@
+# Pre-merge feedback on pull requests. Push to main runs the same jobs
+# inside deploy-pages.yml instead, so nothing runs twice.
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml

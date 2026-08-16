@@ -1,0 +1,68 @@
+[project]
+name = "piggy"
+version = "0.1.0"
+description = "Shared expenses for two — FastAPI + SQLModel backend"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.14.0",
+    "fastapi>=0.115.0",
+    "psycopg2-binary>=2.9.10",
+    "pydantic-settings>=2.6.0",
+    "pydantic[email]>=2.10.0",
+    "python-jose[cryptography]>=3.3.0",
+    "sqlmodel>=0.0.24",
+    "uvicorn>=0.32.0",
+]
+
+[project.scripts]
+serve = "serve:main"
+manage = "manage:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "mypy>=1.13.0",
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+    "types-python-jose>=3.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "C4", "SIM"]
+ignore = ["B008"]  # FastAPI Depends() in defaults
+
+[tool.ruff.lint.per-file-ignores]
+# The wire format mirrors the frontend's camelCase JSON on purpose.
+"src/ledger/schemas.py" = ["N815"]
+# `date` fields shadow the type name inside the class body; the alias is the fix.
+"src/ledger/models.py" = ["N812"]
+"tests/*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+strict_equality = true
+disallow_incomplete_defs = true
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"

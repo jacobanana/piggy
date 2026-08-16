@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Piggy — our shared expenses</title>
+<meta name="description" content="A shared-expenses piggy bank for two: recurring bills, everyday extras and holiday pots, with a running tally of who owes whom.">
+<meta name="theme-color" content="#F2F4FF">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🐷</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="brand"><span class="pig">🐷</span><span id="brandName">Piggy</span></div>
+    <div class="spacer"></div>
+    <button class="icon-btn" data-act="rules" title="Recurring bills">🔁</button>
+    <button class="icon-btn" data-act="settings" title="Settings">⚙️</button>
+  </div>
+  <div class="ledger-bar" id="ledgerBar"></div>
+</header>
+<main class="wrap" id="main"></main>
+<button class="fab" id="fab" data-act="add">＋ Add</button>
+<div id="modalRoot"></div>
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>
