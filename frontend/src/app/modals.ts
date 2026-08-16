@@ -553,7 +553,14 @@ export function personForm(p?: Person): void {
   const isNew = !p;
   const x: Partial<Person> = p || { name: '', emoji: '🙂', color: COLORS[S.people.length % COLORS.length] };
   F.emoji = x.emoji; F.color = x.color;
-  const faces = ['🙂', '😎', '🐰', '🦊', '🐻', '🐼', '🐨', '🦁', '🌻', '🌙', '⭐', '🍀', '🐧', '🦉', '🍓', '🫐'];
+  const faces = [
+    '🙂', '😎', '🐐', '🐰', '🦊', '🐻', '🐼', '🐨',
+    '🦁', '🐯', '🐮', '🐷', '🐶', '🐱', '🐵', '🐸',
+    '🐧', '🦉', '🦆', '🐔', '🦄', '🦌', '🦥', '🦔',
+    '🦦', '🐘', '🐙', '🦋', '🐝', '🐢', '🐳', '🐬',
+    '🦈', '🦖', '🦩', '🦜', '🌻', '🌙', '⭐', '🍀',
+    '🍓', '🫐',
+  ];
   openModal(head(isNew ? 'Add someone' : 'Edit ' + esc(x.name || '')) + `
     <div class="field"><label>Name</label><input class="input" id="pName" value="${esc(x.name)}" autocomplete="off"></div>
     <div class="field"><label>Face</label><div class="emopick" id="emoPick">${faces.map((e) => '<button type="button" data-act="emo" data-v="' + e + '" class="' + (e === x.emoji ? 'on' : '') + '">' + e + '</button>').join('')}</div></div>
@@ -635,7 +642,7 @@ export function addChooser(): void {
 }
 
 /** Faces handed out in order as the onboarding list grows. */
-export const OB_FACES = ['🐰', '🦊', '🐻', '🐼', '🐨', '🦁', '🐧', '🦉'];
+export const OB_FACES = ['🐐', '🦊', '🐻', '🐼', '🐨', '🦁', '🐧', '🦉', '🦄', '🐰', '🦋', '🐙'];
 
 export function onboard(): void {
   const typed = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]'))
