@@ -109,6 +109,13 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .item:hover{border-color:var(--ink);transform:translateY(-1px)}
 .item.skip{opacity:.45}
 .item.skip .name{text-decoration:line-through}
+.item.on{border-color:var(--ink);background:var(--tint)}
+/* the pickable items in the repayment form — a long month has to scroll
+   rather than push the amount box off the screen */
+.picklist{display:flex;flex-direction:column;gap:8px;max-height:236px;overflow-y:auto;padding:2px}
+.picklist .item{transform:none}
+.picklist .emo{width:32px;height:32px;font-size:16px}
+.linkish{border:0;background:none;padding:0;font:inherit;color:var(--ink);font-weight:800;text-decoration:underline;cursor:pointer}
 .emo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:19px;flex:none;background:var(--tint)}
 .item-main{min-width:0;flex:1}
 .name{font-weight:800;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

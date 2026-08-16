@@ -145,6 +145,13 @@ export interface Settlement {
   fxRate: number | null;
   method: string;
   note: string;
+  /**
+   * What the repayment was for: expense ids, or `ruleId|YYYY-MM` for one
+   * month of a recurring bill. A record of intent only — the tally moves by
+   * `amount`, which may be less or more than those items add up to.
+   * Backend equivalent: settlement_items rows.
+   */
+  itemIds?: string[];
   createdAt: Timestamp;
 }
 

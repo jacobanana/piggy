@@ -1,6 +1,6 @@
 /** All read-only rendering: the ledger bar, the two ledger views, the cards. */
 import type { Expense, Ledger, LedgerItem, MonthKey, Person, Settlement } from '../model/types';
-import { S, UI, account, activeLedger, baseCur, person, save, accountEmoji, accountLabel, toBase } from './context';
+import { S, UI, account, activeLedger, baseCur, person, rule, save, accountEmoji, accountLabel, toBase } from './context';
 import { COLORS } from './theme';
 import { onServer } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
@@ -125,15 +125,32 @@ export function receiptCard(l: Ledger, monthKey: MonthKey | null): string {
 }
 
 /* ---------- repayments ---------- */
+/** An item a repayment was logged against — an expense, or a month of a bill. */
+function itemLabel(id: string): string {
+  if (id.includes('|')) {
+    const r = rule(id.split('|')[0]);
+    return r ? r.emoji + ' ' + r.name : '';
+  }
+  const e = S.expenses.find((x) => x.id === id);
+  return e ? e.emoji + ' ' + e.name : '';
+}
+function coversLabel(ids: string[]): string {
+  const named = ids.map(itemLabel).filter(Boolean);
+  if (!named.length) return '';
+  return 'for ' + named[0] + (named.length > 1 ? ' +' + (named.length - 1) + ' more' : '');
+}
+
 function repaymentRow(s: Settlement): string {
   const a = person(s.fromPersonId), b = person(s.toPersonId);
   const base = toBase(s.amount, s.currency, s.fxRate);
   const foreign = s.currency !== baseCur();
+  const covers = coversLabel(s.itemIds || []);
   return '<div class="item" data-act="open-settle" data-id="' + s.id + '">' +
     '<div class="stack pair">' + (avatar(a) || '<span class="avatar">?</span>') + (avatar(b) || '<span class="avatar">?</span>') + '</div>' +
     '<div class="item-main"><div class="name">' + esc(a?.name || 'someone') + ' → ' + esc(b?.name || 'someone') + '</div>' +
     '<div class="meta"><span>' + dayLabel(s.date) + '</span>' +
     (s.method ? '<span>·</span><span>' + esc(PAY_LABEL(s.method)) + '</span>' : '') +
+    (covers ? '<span>·</span><span>' + esc(covers) + '</span>' : '') +
     (s.note ? '<span>·</span><span>' + esc(s.note) + '</span>' : '') + '</div></div>' +
     '<div class="amount">' + money(base, baseCur()) +
     (foreign ? '<small>' + money(s.amount, s.currency) + '</small>' : '') + '</div></div>';

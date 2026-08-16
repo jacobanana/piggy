@@ -38,6 +38,7 @@ from ledger.models import (
     Rule,
     RuleOverride,
     Settlement,
+    SettlementItem,
     Split,
     SplitMode,
     SplitShare,
@@ -156,6 +157,16 @@ def book_to_state(session: Session, book: Book) -> BookState:
     settlements = (
         session.exec(select(Settlement).where(col(Settlement.ledger_id).in_(ledger_ids))).all() if ledger_ids else []
     )
+    settlement_ids = [s.id for s in settlements]
+    settled_items: dict[str, list[str]] = {s.id: [] for s in settlements}
+    if settlement_ids:
+        rows = session.exec(
+            select(SettlementItem)
+            .where(col(SettlementItem.settlement_id).in_(settlement_ids))
+            .order_by(col(SettlementItem.position))
+        ).all()
+        for row in rows:
+            settled_items[row.settlement_id].append(row.item_id)
 
     return BookState(
         meta=MetaState(appName=book.name, createdAt=_iso(book.created_at), updatedAt=_iso(book.updated_at)),
@@ -249,6 +260,7 @@ def book_to_state(session: Session, book: Book) -> BookState:
                 fxRate=float(s.fx_rate) if s.fx_rate is not None else None,
                 method=s.method,
                 note=s.note,
+                itemIds=settled_items[s.id],
                 createdAt=_iso(s.created_at),
             )
             for s in settlements
@@ -277,6 +289,11 @@ def _wipe_book(session: Session, book: Book) -> None:
                 if o.split_id:
                     split_ids.append(o.split_id)
             session.exec(delete(RuleOverride).where(col(RuleOverride.rule_id).in_(rule_ids)))  # type: ignore[call-overload, arg-type, unused-ignore]
+        settlement_ids = [
+            s.id for s in session.exec(select(Settlement).where(col(Settlement.ledger_id).in_(ledger_ids))).all()
+        ]
+        if settlement_ids:
+            session.exec(delete(SettlementItem).where(col(SettlementItem.settlement_id).in_(settlement_ids)))  # type: ignore[call-overload, arg-type, unused-ignore]
         session.exec(delete(Settlement).where(col(Settlement.ledger_id).in_(ledger_ids)))  # type: ignore[call-overload, arg-type, unused-ignore]
         session.exec(delete(Expense).where(col(Expense.ledger_id).in_(ledger_ids)))  # type: ignore[call-overload, arg-type, unused-ignore]
         session.exec(delete(Rule).where(col(Rule.ledger_id).in_(ledger_ids)))  # type: ignore[call-overload, arg-type, unused-ignore]
@@ -421,6 +438,12 @@ def replace_book(session: Session, book: Book, state: BookState) -> None:
                 note=s.note,
             )
         )
+    session.flush()  # settlement items reference settlements
+    for s in state.settlements:
+        # Ticking the same item twice would break the primary key; the order
+        # of first mention is the one worth keeping.
+        for position, item_id in enumerate(dict.fromkeys(s.itemIds)):
+            session.add(SettlementItem(settlement_id=s.id, item_id=item_id, position=position))
     session.commit()
 
 
