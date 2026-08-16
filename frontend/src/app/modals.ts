@@ -485,8 +485,12 @@ export function settingsModal(): void {
     <div class="card-head"><h2>👫 Us</h2><button class="btn soft sm" data-act="new-person">＋ Add</button></div>
     <div class="list">${S.people.map((p) =>
       '<div class="item" data-act="edit-person" data-id="' + p.id + '">' + avatar(p, 'lg') +
-      '<div class="item-main"><div class="name">' + esc(p.name) + '</div><div class="meta">' +
+      '<div class="item-main"><div class="name">' + esc(p.name) +
+      (session.book && session.book.personId === p.id ? ' <span class="tag t-joint">you</span>' : '') + '</div><div class="meta">' +
       S.accounts.filter((a) => a.ownership[p.id]).map((a) => esc(a.name)).join(' · ') + '</div></div><span class="sub">edit</span></div>').join('')}</div>
+    ${onServer() && session.book && !session.book.personId && S.people.length
+      ? '<div class="hint">None of these is linked to your account yet — <button class="btn soft sm" data-act="claim-open">say which one is you</button> so the tally knows your side.</div>'
+      : ''}
     <div class="divider"></div>
     <div class="card-head"><h2>🏦 Accounts</h2><button class="btn soft sm" data-act="new-account">＋ Add</button></div>
     <div class="list">${S.accounts.map((a) =>
@@ -519,8 +523,12 @@ export function settingsModal(): void {
     <div style="margin-top:14px"><button class="btn danger wide" data-act="reset">Erase everything</button></div>
     <input type="file" id="importFile" accept="application/json" style="display:none">
     ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Account</h2></div>' +
-      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>.</div>' +
-      '<div style="margin-top:10px"><button class="btn soft wide" data-act="signout">Sign out</button></div>' : ''}
+      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>' +
+      (session.book ? ', in <b>' + esc(session.book.name) + '</b>' : '') + '.</div>' +
+      '<div class="row-btns" style="margin-top:10px">' +
+      '<button class="btn soft" data-act="banks">🏦 Piggy banks</button>' +
+      '<button class="btn soft" data-act="share">👋 Share this one</button>' +
+      '<button class="btn soft" data-act="signout">Sign out</button></div>' : ''}
     <div class="divider"></div>
     <button class="btn primary wide" data-act="save-settings">Save settings</button>`);
 }
@@ -626,13 +634,18 @@ export function addChooser(): void {
     '<div class="item-main"><div class="name">Repayment</div><div class="meta">money one of you paid the other back</div></div></div></div>');
 }
 
+/** Faces handed out in order as the onboarding list grows. */
+export const OB_FACES = ['🐰', '🦊', '🐻', '🐼', '🐨', '🦁', '🐧', '🦉'];
+
 export function onboard(): void {
-  const n1 = ($('#ob1') as HTMLInputElement).value.trim() || 'Me';
-  const n2 = ($('#ob2') as HTMLInputElement).value.trim() || 'You';
+  const typed = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]'))
+    .map((el) => el.value.trim())
+    .filter(Boolean);
+  const names = typed.length ? typed : ['Me', 'You'];
   S.settings.baseCurrency = ($('#obCur') as HTMLSelectElement).value;
   S.settings.rates[S.settings.baseCurrency] = 1;
-  ([[n1, '🐰', COLORS[0]], [n2, '🦊', COLORS[1]]] as const).forEach(([name, emoji, color]) => {
-    const p: Person = { id: uid('per_'), name, emoji, color };
+  names.forEach((name, i) => {
+    const p: Person = { id: uid('per_'), name, emoji: OB_FACES[i % OB_FACES.length], color: COLORS[i % COLORS.length] };
     S.people.push(p);
     S.accounts.push({ id: uid('acc_'), name: name + "'s money", kind: 'personal', ownership: { [p.id]: 1 } });
   });

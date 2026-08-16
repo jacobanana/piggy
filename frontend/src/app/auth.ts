@@ -2,15 +2,15 @@
  * The sign-in gate for the self-hosted build.
  *
  * Nothing in here runs on GitHub Pages: main.ts only reaches this module
- * after /api/health has answered. While the gate is up the app chrome is
- * hidden (body.gate) and no book is on screen, so a signed-out visitor never
- * sees somebody else's ledger — or an empty one they could type into.
+ * after /api/health has answered. Once somebody is in, books.ts takes over
+ * and decides which piggy bank to open.
  */
 import { setState } from './context';
-import { hydrate } from './hydrate';
+import { enterBooks } from './books';
+import { markBusy, paintGate } from './gate';
 import { toast } from './modals';
-import { session } from './session';
-import { ApiError, getBook, requestCode, signOut, verifyCode } from '../storage/api';
+import { rememberBook, session } from './session';
+import { ApiError, requestCode, signOut, verifyCode } from '../storage/api';
 import { blankState } from '../model/state';
 import { $, esc } from '../lib/utils';
 
@@ -19,36 +19,14 @@ type Step = 'email' | 'code';
 const A: { step: Step; email: string; verificationId: string; error: string; busy: boolean } =
   { step: 'email', email: '', verificationId: '', error: '', busy: false };
 
-function gateOn(): void {
-  document.body.classList.add('gate');
-  const bar = $('#ledgerBar'); if (bar) bar.innerHTML = '';
-  const fab = $('#fab'); if (fab) fab.style.display = 'none';
-}
-
-export function leaveGate(): void {
-  document.body.classList.remove('gate');
-}
-
-function paint(html: string): void {
-  gateOn();
-  const main = $('#main');
-  if (main) main.innerHTML = html;
-}
-
 const errorLine = (): string =>
   A.error ? '<div class="auth-error">' + esc(A.error) + '</div>' : '';
-
-/** Shown while the backend probe or the first book fetch is in flight. */
-export function splash(message: string): void {
-  paint('<div class="card center" style="margin-top:20px"><div class="empty">' +
-    '<span class="big">🐷</span>' + esc(message) + '</div></div>');
-}
 
 export function signInScreen(error?: string): void {
   A.error = error || '';
   A.busy = false;
   if (A.step === 'email') {
-    paint(`
+    paintGate(`
       <div class="card" style="margin-top:20px">
         <h2 style="font-size:22px">Welcome back 🐷</h2>
         <p class="sub" style="margin:8px 0 18px;line-height:1.5">This piggy bank lives on the server, so it needs to know who you are. Pop in your email and we'll send you a sign-in code.</p>
@@ -61,7 +39,7 @@ export function signInScreen(error?: string): void {
     const el = $('#authEmail') as HTMLInputElement | null;
     if (el && !A.email) el.focus();
   } else {
-    paint(`
+    paintGate(`
       <div class="card" style="margin-top:20px">
         <h2 style="font-size:22px">Check your email 📬</h2>
         <p class="sub" style="margin:8px 0 18px;line-height:1.5">If <b>${esc(A.email)}</b> has an account, a 6-digit code is on its way. It's good for 15 minutes.</p>
@@ -78,19 +56,6 @@ export function signInScreen(error?: string): void {
     const el = $('#authCode') as HTMLInputElement | null;
     if (el) el.focus();
   }
-}
-
-/** Freeze the submit button while a round trip is in flight. */
-function markBusy(label: string): void {
-  const btn = $<HTMLButtonElement>('#main .btn.primary');
-  if (btn) { btn.disabled = true; btn.textContent = label; }
-}
-
-/** A dead end that is worth retrying — the server is up but the call failed. */
-function offlineScreen(message: string): void {
-  paint('<div class="card" style="margin-top:20px"><h2 style="font-size:22px">Can\'t reach the server 📡</h2>' +
-    '<p class="sub" style="margin:8px 0 18px;line-height:1.5">' + esc(message) + '</p>' +
-    '<button class="btn primary wide" data-act="auth-retry">Try again</button></div>');
 }
 
 /* ---------- actions ---------- */
@@ -122,7 +87,7 @@ export async function submitCode(): Promise<void> {
   markBusy('Signing in…');
   try {
     session.user = await verifyCode(A.verificationId, code);
-    await enterApp();
+    await enterBooks();
   } catch (err) {
     signInScreen(err instanceof ApiError ? err.message : "Couldn't reach the server — try again in a moment.");
   }
@@ -134,30 +99,11 @@ export function backToEmail(): void {
   signInScreen();
 }
 
-/** Fetch the book this account owns and hand the app over to it. */
-export async function enterApp(): Promise<void> {
-  splash('Fetching your book…');
-  try {
-    const book = await getBook();
-    leaveGate();
-    hydrate(book);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      signOut();
-      session.user = null;
-      A.step = 'email';
-      signInScreen('That session has expired — sign in again.');
-      return;
-    }
-    offlineScreen(err instanceof Error ? err.message : 'Something went wrong loading your book.');
-  }
-}
-
-export function retry(): void { void enterApp(); }
-
 export function doSignOut(): void {
   signOut();
   session.user = null;
+  session.book = null;
+  rememberBook(null);
   A.step = 'email';
   A.verificationId = '';
   setState(blankState());
@@ -167,7 +113,9 @@ export function doSignOut(): void {
 
 /** The session died mid-use (refresh token rejected). Back to the gate. */
 export function sessionExpired(): void {
+  signOut();
   session.user = null;
+  session.book = null;
   A.step = 'email';
   setState(blankState());
   signInScreen('That session has expired — sign in again.');

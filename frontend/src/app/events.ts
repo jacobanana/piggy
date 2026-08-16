@@ -1,13 +1,17 @@
 /** Global event delegation — every click/input/change routes through data-act. */
 import { S, UI, account, activeLedger, ledger, person, rule, save } from './context';
-import { commit, render } from './render';
+import { addOnboardSlot, commit, render } from './render';
 import {
   F, accountForm, addChooser, closeModal, doSettle, expenseForm, ledgerForm, occurrenceModal,
   onboard, personForm, refreshSplit, ruleForm, rulesModal, saveAccount, saveExpense, saveLedger,
   saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal, settleModal,
   settlementForm, toast,
 } from './modals';
-import { backToEmail, doSignOut, retry, sendCode, submitCode } from './auth';
+import { backToEmail, doSignOut, sendCode, submitCode } from './auth';
+import {
+  acceptJoin, banksModal, claim, claimModal, copyInvite, killInvite, kickMember,
+  leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks, shareModal, switchTo,
+} from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { applyTheme } from './theme';
 import { blankState } from '../model/state';
@@ -23,12 +27,24 @@ export function wireEvents(): void {
     if (!S) return;
     const l = activeLedger();
     switch (act) {
-      /* sign-in gate (self-hosted build only) */
+      /* sign-in gate and sharing (self-hosted build only) */
       case 'auth-send': case 'auth-resend': void sendCode(); return;
       case 'auth-verify': void submitCode(); return;
       case 'auth-back': backToEmail(); return;
-      case 'auth-retry': retry(); return;
+      case 'auth-retry': case 'books-retry': retryBooks(); return;
       case 'signout': closeModal(); doSignOut(); return;
+      case 'banks': void banksModal(); return;
+      case 'book-open': void switchTo(id); return;
+      case 'book-new': void newBank(); return;
+      case 'book-leave': void leaveBank(); return;
+      case 'share': void shareModal(); return;
+      case 'invite-new': void makeInvite(); return;
+      case 'invite-copy': void copyInvite(id); return;
+      case 'invite-revoke': void killInvite(id); return;
+      case 'member-remove': void kickMember(id); return;
+      case 'claim-open': void claimModal(); return;
+      case 'claim-person': void claim(id); return;
+      case 'join-accept': void acceptJoin(id); return;
 
       case 'backdrop': if (e.target === el) closeModal(); return;
       case 'close': closeModal(); return;
@@ -186,7 +202,10 @@ export function wireEvents(): void {
           closeModal(); commit();
         }
         return;
-      case 'ob-go': onboard(); return;
+      /* The people only exist once onboarding runs, so this is the first
+         moment the book's creator can say which of them is them. */
+      case 'ob-go': onboard(); void maybeAskWhoYouAre(); return;
+      case 'ob-more': addOnboardSlot(); return;
     }
   });
 

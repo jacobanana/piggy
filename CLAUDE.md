@@ -50,6 +50,11 @@ app and shown as screenshots (load the `app-screenshots` skill), not
 described. `bash scripts/start_app.sh` runs everything without Docker,
 including on a fresh web/phone container.
 
+**Always send the screenshots to the chat** with `SendUserFile`, in the same
+turn you take them — do not merely save them under `.dev/screenshots/` and
+say where they are. Most sessions are read on a phone; a path is not a
+picture. Send them as you go, not batched at the very end.
+
 **Users in dev**: `uv run manage create --email you@example.com --name You
 --role admin`. Sign-in codes print to the backend log when SMTP is unset;
 `uv run manage login-code --email ...` reads the pending one back.

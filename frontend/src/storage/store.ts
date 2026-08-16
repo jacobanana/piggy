@@ -55,14 +55,41 @@ export const localAdapter: StorageAdapter = {
 
 /**
  * Sync news for the app layer, as a window event so that storage stays free
- * of DOM imports. `ok: false` means the last write did not land; `expired`
- * means the session is gone and the sign-in screen has to come back.
+ * of DOM imports.
+ *
+ * `state` is what the server ended up with — after a merge that can hold
+ * somebody else's edits, so the app adopts it rather than assuming its own
+ * copy won. `expired` means the session is gone; `conflict` means we drifted
+ * too far to merge and have to reload.
  */
-export interface SyncDetail { ok: boolean; expired: boolean }
-
-function announce(ok: boolean, expired = false): void {
-  window.dispatchEvent(new CustomEvent<SyncDetail>('piggy:sync', { detail: { ok, expired } }));
+export interface SyncDetail {
+  ok: boolean;
+  expired: boolean;
+  conflict: boolean;
+  state?: AppState;
 }
+
+function announce(detail: Partial<SyncDetail> & { ok: boolean }): void {
+  window.dispatchEvent(new CustomEvent<SyncDetail>('piggy:sync', {
+    detail: { expired: false, conflict: false, ...detail },
+  }));
+}
+
+/**
+ * Which book we are synced to, and the version it was at. The version is what
+ * lets the server merge somebody else's writes into ours instead of letting
+ * whoever saves last flatten the other.
+ */
+let bookId: string | null = null;
+let version: number | null = null;
+
+export function useServerBook(id: string | null): void {
+  bookId = id;
+  version = null;
+  useAdapter(serverAdapter);
+}
+
+export const currentBookId = (): string | null => bookId;
 
 /**
  * Writes are chained rather than fired in parallel: the endpoint replaces the
@@ -70,20 +97,33 @@ function announce(ok: boolean, expired = false): void {
  * one would win.
  */
 let queue: Promise<unknown> = Promise.resolve();
+let writing = 0;
+
+export const isIdle = (): boolean => writing === 0;
 
 export const serverAdapter: StorageAdapter = {
   async load() {
-    return getBook();   // a failure here is fatal to boot; main.ts decides what to show
+    const got = await getBook(bookId);   // a failure here is fatal to boot; the caller decides what to show
+    version = got.version;
+    return got.state;
   },
   save(data) {
     const snapshot = JSON.parse(JSON.stringify(data)) as AppState;
+    writing += 1;
     const run = queue.then(async () => {
       try {
-        await putBook(snapshot);
-        announce(true);
+        const saved = await putBook(bookId, snapshot, version);
+        version = saved.version;
+        writing -= 1;
+        /* Only hand the merged copy back when nothing else is queued. An
+           earlier response is missing whatever was edited while it was in
+           flight, and adopting it would undo those edits on screen. */
+        announce({ ok: true, state: writing === 0 ? saved.state : undefined });
         return true;
       } catch (err) {
-        announce(false, err instanceof ApiError && err.status === 401);
+        writing -= 1;
+        const status = err instanceof ApiError ? err.status : 0;
+        announce({ ok: false, expired: status === 401, conflict: status === 409 });
         return false;
       }
     });
@@ -91,6 +131,18 @@ export const serverAdapter: StorageAdapter = {
     return run;
   },
 };
+
+/**
+ * Pull the book if somebody else has moved it on. Returns null when we are
+ * already current, so the caller only re-renders on real news.
+ */
+export async function refresh(): Promise<AppState | null> {
+  if (!usingServer() || version === null) return null;
+  const got = await getBook(bookId);
+  if (version !== null && got.version !== null && got.version <= version) return null;
+  version = got.version;
+  return got.state;
+}
 
 let active: StorageAdapter = localAdapter;
 

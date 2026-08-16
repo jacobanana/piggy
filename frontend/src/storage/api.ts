@@ -178,11 +178,110 @@ export async function verifyCode(verificationId: string, code: string): Promise<
   return j.user;
 }
 
-export async function getBook(): Promise<AppState> {
-  return json<AppState>(await authed('book'), "Couldn't load your book.");
+/* ---------- books ---------- */
+
+/**
+ * A book and the version it was at. The version rides in the ETag rather
+ * than the body so the body stays byte-identical to AppState — that shape is
+ * shared with localStorage and the export files.
+ */
+export interface VersionedBook { state: AppState; version: number | null }
+
+function etag(res: Response): number | null {
+  const raw = res.headers.get('ETag');
+  if (!raw) return null;
+  const n = Number(raw.replace(/^W\//, '').replace(/"/g, ''));
+  return Number.isFinite(n) ? n : null;
 }
 
-export async function putBook(state: AppState): Promise<AppState> {
-  const res = await authed('book', { method: 'PUT', body: JSON.stringify(state) });
-  return json<AppState>(res, "Couldn't save your book.");
+export async function getBook(bookId: string | null): Promise<VersionedBook> {
+  const res = await authed(bookId ? `books/${bookId}` : 'book');
+  const state = await json<AppState>(res, "Couldn't load your book.");
+  return { state, version: etag(res) };
 }
+
+export async function putBook(
+  bookId: string | null,
+  state: AppState,
+  baseVersion: number | null,
+): Promise<VersionedBook> {
+  const res = await authed(bookId ? `books/${bookId}` : 'book', {
+    method: 'PUT',
+    body: JSON.stringify(state),
+    headers: baseVersion === null ? undefined : { 'If-Match': `"${baseVersion}"` },
+  });
+  const merged = await json<AppState>(res, "Couldn't save your book.");
+  return { state: merged, version: etag(res) };
+}
+
+export interface BookSummary {
+  id: string;
+  name: string;
+  role: 'owner' | 'member';
+  members: number;
+  personId: string | null;
+}
+
+export const listBooks = async (): Promise<BookSummary[]> =>
+  json<BookSummary[]>(await authed('books'), "Couldn't list your piggy banks.");
+
+export const createBook = async (name: string): Promise<BookSummary> =>
+  json<BookSummary>(
+    await authed('books', { method: 'POST', body: JSON.stringify({ name }) }),
+    "Couldn't create that piggy bank.",
+  );
+
+/* ---------- members ---------- */
+
+export interface Member {
+  userId: string;
+  email: string;
+  name: string;
+  role: 'owner' | 'member';
+  personId: string | null;
+  isMe: boolean;
+}
+
+export const listMembers = async (bookId: string): Promise<Member[]> =>
+  json<Member[]>(await authed(`books/${bookId}/members`), "Couldn't list the members.");
+
+export const claimPerson = async (bookId: string, personId: string | null): Promise<Member> =>
+  json<Member>(
+    await authed(`books/${bookId}/members/me/person`, { method: 'PUT', body: JSON.stringify({ personId }) }),
+    "Couldn't link you to that person.",
+  );
+
+export async function removeMember(bookId: string, userId: string): Promise<void> {
+  const res = await authed(`books/${bookId}/members/${userId}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't remove them."));
+}
+
+/* ---------- invites ---------- */
+
+export interface Invite { id: string; code: string; expiresAt: string }
+
+export const listInvites = async (bookId: string): Promise<Invite[]> =>
+  json<Invite[]>(await authed(`books/${bookId}/invites`), "Couldn't list the invites.");
+
+export const createInvite = async (bookId: string): Promise<Invite> =>
+  json<Invite>(await authed(`books/${bookId}/invites`, { method: 'POST' }), "Couldn't make an invite.");
+
+export async function revokeInvite(bookId: string, inviteId: string): Promise<void> {
+  const res = await authed(`books/${bookId}/invites/${inviteId}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't revoke that invite."));
+}
+
+export interface InvitePreview { code: string; bookName: string; members: number; alreadyMember: boolean }
+
+export const previewInvite = async (code: string): Promise<InvitePreview> =>
+  json<InvitePreview>(await authed(`invites/${encodeURIComponent(code)}`), "That invite didn't work.");
+
+export const acceptInvite = async (code: string): Promise<BookSummary> =>
+  json<BookSummary>(
+    await authed(`invites/${encodeURIComponent(code)}/accept`, { method: 'POST' }),
+    "Couldn't join that piggy bank.",
+  );
+
+/** The link you actually send someone. */
+export const inviteUrl = (code: string): string =>
+  location.origin + location.pathname + '?join=' + code;
