@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, settlementsFor, simplifyDebts } from './balances';
+import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, simplifyDebts } from './balances';
 import { blankState } from '../model/state';
 import type { AppState, Expense, Settlement } from '../model/types';
 
@@ -117,6 +117,35 @@ describe('settlementsFor', () => {
     const s = fixture();
     s.settlements = [settlement({}), settlement({ id: 's2', ledgerId: 'trip' })];
     expect(settlementsFor(s, 'home').map((x) => x.id)).toEqual(['s1']);
+  });
+});
+
+describe('settledItemIds', () => {
+  it('gathers the items every repayment in the ledger was logged against', () => {
+    const s = fixture();
+    s.settlements = [
+      settlement({ id: 's1', itemIds: ['e1', 'rule-rent|2025-03'] }),
+      settlement({ id: 's2', itemIds: ['e2'] }),
+    ];
+    expect([...settledItemIds(s, 'home')].sort()).toEqual(['e1', 'e2', 'rule-rent|2025-03']);
+  });
+
+  it('leaves the repayment being edited out, so its own items stay pickable', () => {
+    const s = fixture();
+    s.settlements = [settlement({ id: 's1', itemIds: ['e1'] }), settlement({ id: 's2', itemIds: ['e2'] })];
+    expect([...settledItemIds(s, 'home', 's1')]).toEqual(['e2']);
+  });
+
+  it('ignores repayments belonging to another ledger', () => {
+    const s = fixture();
+    s.settlements = [settlement({ ledgerId: 'trip', itemIds: ['e1'] })];
+    expect([...settledItemIds(s, 'home')]).toEqual([]);
+  });
+
+  it('is empty when nothing was ticked', () => {
+    const s = fixture();
+    s.settlements = [settlement({})];
+    expect([...settledItemIds(s, 'home')]).toEqual([]);
   });
 });
 

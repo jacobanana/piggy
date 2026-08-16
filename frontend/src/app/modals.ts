@@ -7,7 +7,7 @@ import { myPersonId, onServer, session } from './session';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, pairwiseDebt, simplifyDebts } from '../domain/balances';
+import { computeBalances, pairwiseDebt, settledItemIds, simplifyDebts } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
 import { defaultAccountId, itemsInScope, overrideOf } from '../domain/selectors';
 
@@ -18,6 +18,8 @@ export const F: {
   split?: { mode: SplitMode; participants: string[]; values: Record<string, number | string> };
   /** Ledger items a repayment is being logged against, in the order ticked. */
   items?: string[];
+  /** The repayment being edited, if any — its own items stay pickable. */
+  settleId?: string;
   /** The amount the repayment form opened with, and the last one it filled in
       by itself — the pair is how a hand-typed override is recognised. */
   openAmount?: string; autoAmount?: string;
@@ -401,19 +403,29 @@ const everyItem = (): LedgerItem[] => itemsInScope(S, activeLedger()!.id, null);
  */
 function pickable(from: string, to: string): { it: LedgerItem; owed: number }[] {
   const picked = F.items || [];
+  const done = settledItemIds(S, activeLedger()!.id, F.settleId);
   return everyItem()
     .map((it) => ({ it, owed: pairwiseDebt(S, it, from, to) }))
     /* Every month is on offer, not just the one on screen — paying in July for
        August's rent is the ordinary case. Something already ticked stays listed
-       even once it is square, so editing an old repayment never drops it. */
-    .filter((c) => picked.includes(c.it.id) || c.owed > 0)
+       even once it is square, so editing an old repayment never drops it — but
+       anything an earlier repayment already covered is gone from the list. */
+    .filter((c) => picked.includes(c.it.id) || (c.owed > 0 && !done.has(c.it.id)))
     .sort((a, b) => (a.it.date === b.it.date ? 0 : a.it.date < b.it.date ? 1 : -1));
+}
+
+/** Whether the picker is empty only because earlier repayments took it all. */
+function allAlreadyCovered(from: string, to: string): boolean {
+  const done = settledItemIds(S, activeLedger()!.id, F.settleId);
+  return everyItem().some((it) => done.has(it.id) && pairwiseDebt(S, it, from, to) > 0);
 }
 
 export function pickBox(from: string, to: string): string {
   const all = pickable(from, to);
   if (!all.length) {
-    return '<div class="hint" style="margin-top:0">Nothing outstanding between these two right now — just put the amount in below.</div>';
+    return '<div class="hint" style="margin-top:0">' + (allAlreadyCovered(from, to)
+      ? 'Everything between these two is already on an earlier repayment — just put the amount in below.'
+      : 'Nothing outstanding between these two right now — just put the amount in below.') + '</div>';
   }
   const picked = F.items || [];
   const rows = all.slice(0, PICK_LIMIT).map(({ it, owed }) => {
@@ -501,6 +513,7 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
     date: l.kind === 'trip' ? clampToTrip(l) : defaultDate(), note: '',
   };
   F.method = x.method || lastPayMethod();
+  F.settleId = st ? st.id : undefined;
   F.items = (st && st.itemIds ? st.itemIds.slice() : []);
   const openAmount = x.amount != null ? String(x.amount) : '';
   F.openAmount = openAmount;
