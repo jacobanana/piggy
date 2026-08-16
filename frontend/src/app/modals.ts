@@ -4,6 +4,7 @@ import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, ac
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
 import { onServer, session } from './session';
+import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
 import { computeBalances, simplifyDebts } from '../domain/balances';
@@ -33,6 +34,7 @@ export function closeModal(): void {
   if (root) root.innerHTML = '';
   document.body.style.overflow = '';
   clearF();
+  repaintIfOwed();   // the sync poll may have landed while this was on top
 }
 
 export function toast(msg: string): void {
