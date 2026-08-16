@@ -7,6 +7,7 @@ src/core/config.py
 src/core/db.py
 src/core/email.py
 src/core/http.py
+src/core/logging.py
 src/core/utils.py
 src/database/connection.py
 src/identity/__init__.py
@@ -29,6 +30,7 @@ src/piggy.egg-info/requires.txt
 src/piggy.egg-info/top_level.txt
 tests/test_auth.py
 tests/test_book.py
+tests/test_email.py
 tests/test_manage.py
 tests/test_merge.py
 tests/test_migrations.py
