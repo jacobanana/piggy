@@ -1,8 +1,22 @@
-import type { AppState, Expense, LedgerItem, MonthKey, Occurrence } from '../model/types';
+import type { Account, AppState, Expense, LedgerItem, MonthKey, Occurrence } from '../model/types';
 import { occurrence, ruleHitsMonth } from './recurrence';
 import { splitCents } from './splits';
 import { toBase } from './fx';
 import { cents, monthFromIndex, monthIndex, monthOf, thisMonth, addMonths } from '../lib/utils';
+
+/**
+ * Which account to pre-select as the payer of a new entry.
+ *
+ * Whoever is filling the form nearly always paid for it themselves, so their
+ * own account leads: a personal one first, then any pot they hold a share of.
+ * With nobody signed in — the Pages build, or a member who hasn't said which
+ * person they are — it stays the first account, exactly as it always was.
+ */
+export function defaultAccountId(accounts: Account[], personId: string | null): string | undefined {
+  const mine = (a: Account): boolean => !!personId && (a.ownership[personId] || 0) > 0;
+  const own = accounts.find((a) => a.kind === 'personal' && mine(a)) || accounts.find(mine);
+  return (own || accounts[0])?.id;
+}
 
 export const overrideOf = (s: AppState, ruleId: string, period: MonthKey) =>
   s.overrides.find((o) => o.ruleId === ruleId && o.period === period);

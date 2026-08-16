@@ -3,13 +3,13 @@ import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Sp
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
-import { onServer, session } from './session';
+import { myPersonId, onServer, session } from './session';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, daysInMonth, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
 import { computeBalances, pairwiseDebt, simplifyDebts } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
-import { itemsInScope, overrideOf } from '../domain/selectors';
+import { defaultAccountId, itemsInScope, overrideOf } from '../domain/selectors';
 
 /** Transient form state (emoji + split being edited, etc.). Cleared on close. */
 export const F: {
@@ -153,7 +153,8 @@ export function expenseForm(exp?: Expense): void {
   const isNew = !exp;
   const e: Partial<Expense> = exp || {
     emoji: '🛒', name: '', currency: l.kind === 'trip' ? l.currency || baseCur() : baseCur(),
-    date: l.kind === 'trip' ? clampToTrip(l) : defaultDate(), accountId: (S.accounts[0] || {}).id,
+    date: l.kind === 'trip' ? clampToTrip(l) : defaultDate(),
+    accountId: defaultAccountId(S.accounts, myPersonId()),
     method: 'card', notes: '',
   };
   F.emoji = e.emoji || '🛒';
