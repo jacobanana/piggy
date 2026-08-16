@@ -562,6 +562,16 @@ def _fresh_code(session: Session) -> str:
 
 
 def create_invite(session: Session, book_id: UUID, user: User) -> BookInvite:
+    """This book's link, minted only if it hasn't got one.
+
+    One book, one live link. Minting a second on every press left codes alive
+    that the share screen no longer showed, so an owner could not revoke what
+    they had handed out — and a pile of anonymous codes reads as "every link
+    I have ever made", not "the link to this piggy bank".
+    """
+    existing = current_invite(session, book_id)
+    if existing is not None:
+        return existing
     invite = BookInvite(
         book_id=book_id,
         code=_fresh_code(session),
@@ -580,9 +590,26 @@ def live_invites(session: Session, book_id: UUID) -> list[BookInvite]:
     return [i for i in rows if i.revoked_at is None and ensure_utc(i.expires_at) > now]
 
 
+def current_invite(session: Session, book_id: UUID) -> BookInvite | None:
+    """The one live link for this book, or None. The newest wins if history
+    left more than one behind — the migration that retires the extras is
+    what keeps that from happening again."""
+    live = live_invites(session, book_id)
+    return max(live, key=lambda i: ensure_utc(i.created_at)) if live else None
+
+
 def revoke_invite(session: Session, invite: BookInvite) -> None:
     invite.revoked_at = utcnow()
     session.add(invite)
+    session.commit()
+
+
+def revoke_book_invites(session: Session, book_id: UUID) -> None:
+    """Kill this book's link. Anyone still holding it stops getting in."""
+    now = utcnow()
+    for invite in live_invites(session, book_id):
+        invite.revoked_at = now
+        session.add(invite)
     session.commit()
 
 

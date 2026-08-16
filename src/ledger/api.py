@@ -10,13 +10,15 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, col, select
 
 from database.connection import get_session
+from identity.api import LoginCodeRequested, get_login_code_service
 from identity.dependencies import get_current_user
 from identity.models import User
-from ledger.models import Book, BookInvite, BookMember, MemberRole
+from identity.services import LoginCodeService, UserService
+from ledger.models import Book, BookMember, MemberRole
 from ledger.schemas import BookState
 from ledger.service import (
     INVITE_TTL_DAYS,
@@ -26,14 +28,14 @@ from ledger.service import (
     claim_person,
     create_book,
     create_invite,
+    current_invite,
     ensure_book_for_user,
     invite_by_code,
-    live_invites,
     member_count,
     membership_in,
     read_book,
     remove_member,
-    revoke_invite,
+    revoke_book_invites,
     sync_book,
 )
 
@@ -81,6 +83,13 @@ class InvitePreview(BaseModel):
     bookName: str
     members: int
     alreadyMember: bool
+
+
+class InviteClaim(BaseModel):
+    """Arriving with a link and no account yet."""
+
+    email: EmailStr
+    name: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -252,27 +261,31 @@ def delete_member(user_id: UUID, access: Access, current_user: CurrentUser, sess
 # --------------------------------------------------------------------------
 
 
-@router.get("/books/{book_id}/invites", response_model=list[InviteOut])
-def list_invites(access: OwnerAccess, session: Db) -> list[InviteOut]:
+@router.get("/books/{book_id}/invite", response_model=InviteOut | None)
+def get_invite(access: OwnerAccess, session: Db) -> InviteOut | None:
+    """This book's link, or null. One book, one link — never somebody else's."""
     book, _ = access
-    return [InviteOut(id=i.id, code=i.code, expiresAt=i.expires_at) for i in live_invites(session, book.id)]
+    invite = current_invite(session, book.id)
+    return None if invite is None else InviteOut(id=invite.id, code=invite.code, expiresAt=invite.expires_at)
 
 
-@router.post("/books/{book_id}/invites", response_model=InviteOut, status_code=status.HTTP_201_CREATED)
+@router.post("/books/{book_id}/invite", response_model=InviteOut)
 def post_invite(access: OwnerAccess, current_user: CurrentUser, session: Db) -> InviteOut:
-    """Mint a share code. Good for INVITE_TTL_DAYS and usable by anyone holding it."""
+    """This book's link, minted if it hasn't got one.
+
+    Idempotent on purpose: pressing share twice hands back the same code, so
+    the link already sent to somebody stays the live one. Good for
+    INVITE_TTL_DAYS, and it opens this book and no other.
+    """
     book, _ = access
     invite = create_invite(session, book.id, current_user)
     return InviteOut(id=invite.id, code=invite.code, expiresAt=invite.expires_at)
 
 
-@router.delete("/books/{book_id}/invites/{invite_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_invite(invite_id: UUID, access: OwnerAccess, session: Db) -> None:
+@router.delete("/books/{book_id}/invite", status_code=status.HTTP_204_NO_CONTENT)
+def delete_invite(access: OwnerAccess, session: Db) -> None:
     book, _ = access
-    invite = session.get(BookInvite, invite_id)
-    if invite is None or invite.book_id != book.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No such invite.")
-    revoke_invite(session, invite)
+    revoke_book_invites(session, book.id)
 
 
 @router.get("/invites/{code}", response_model=InvitePreview)
@@ -288,6 +301,26 @@ def preview_invite(code: str, current_user: CurrentUser, session: Db) -> InviteP
         members=member_count(session, book.id),
         alreadyMember=membership_in(session, book.id, current_user.id) is not None,
     )
+
+
+@router.post("/invites/{code}/claim", response_model=LoginCodeRequested, status_code=status.HTTP_202_ACCEPTED)
+def claim_invite(
+    code: str,
+    body: InviteClaim,
+    login_codes: Annotated[LoginCodeService, Depends(get_login_code_service)],
+    session: Db,
+) -> LoginCodeRequested:
+    """Start signing in against an invite code, making the account if need be.
+
+    Piggy has no open sign-up: `manage create` was the only way in, which left
+    an invite link useless to the very person it was sent to. A live code is
+    the ticket — hold one and you may mint exactly one account, for the
+    address you can read mail at, and the sign-in code goes there as usual.
+    """
+    invite_by_code(session, code)  # 404/400 before an account is made
+    user = UserService(session).ensure_user(body.email, body.name)
+    verification = login_codes.request(user.email)
+    return LoginCodeRequested(verification_id=verification.id, expires_at=verification.expires_at)
 
 
 @router.post("/invites/{code}/accept", response_model=BookSummary)

@@ -7,7 +7,7 @@ import {
   saveLedger, saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal,
   settleModal, settlementForm, syncPickedAmount, toast,
 } from './modals';
-import { backToEmail, doSignOut, sendCode, submitCode } from './auth';
+import { backToEmail, cancelJoin, doSignOut, sendCode, startJoin, submitCode, submitJoinCode } from './auth';
 import {
   acceptJoin, banksModal, claim, claimModal, copyInvite, killInvite, kickMember,
   leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks, shareModal, switchTo,
@@ -31,6 +31,9 @@ export function wireEvents(): void {
       case 'auth-send': case 'auth-resend': void sendCode(); return;
       case 'auth-verify': void submitCode(); return;
       case 'auth-back': backToEmail(); return;
+      case 'auth-join': startJoin(); return;
+      case 'auth-join-go': submitJoinCode(); return;
+      case 'auth-join-cancel': cancelJoin(); return;
       case 'auth-retry': case 'books-retry': retryBooks(); return;
       case 'signout': closeModal(); doSignOut(); return;
       case 'banks': void banksModal(); return;
@@ -40,7 +43,7 @@ export function wireEvents(): void {
       case 'share': void shareModal(); return;
       case 'invite-new': void makeInvite(); return;
       case 'invite-copy': void copyInvite(id); return;
-      case 'invite-revoke': void killInvite(id); return;
+      case 'invite-revoke': void killInvite(); return;
       case 'member-remove': void kickMember(id); return;
       case 'claim-open': void claimModal(); return;
       case 'claim-person': void claim(id); return;
@@ -244,5 +247,6 @@ export function wireEvents(): void {
     const id = (e.target as HTMLElement).id;
     if (id === 'authEmail') { e.preventDefault(); void sendCode(); }
     if (id === 'authCode') { e.preventDefault(); void submitCode(); }
+    if (id === 'authJoinCode') { e.preventDefault(); submitJoinCode(); }
   });
 }

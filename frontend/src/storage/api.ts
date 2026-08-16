@@ -256,25 +256,43 @@ export async function removeMember(bookId: string, userId: string): Promise<void
   if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't remove them."));
 }
 
-/* ---------- invites ---------- */
+/* ---------- the invite link ---------- */
 
+/** A piggy bank has one link, and it opens that piggy bank and no other. */
 export interface Invite { id: string; code: string; expiresAt: string }
 
-export const listInvites = async (bookId: string): Promise<Invite[]> =>
-  json<Invite[]>(await authed(`books/${bookId}/invites`), "Couldn't list the invites.");
+export const getInvite = async (bookId: string): Promise<Invite | null> =>
+  json<Invite | null>(await authed(`books/${bookId}/invite`), "Couldn't fetch the invite link.");
 
+/** Idempotent: hands back the live link if there is one, so a link already
+    sent stays the one that works. */
 export const createInvite = async (bookId: string): Promise<Invite> =>
-  json<Invite>(await authed(`books/${bookId}/invites`, { method: 'POST' }), "Couldn't make an invite.");
+  json<Invite>(await authed(`books/${bookId}/invite`, { method: 'POST' }), "Couldn't make an invite link.");
 
-export async function revokeInvite(bookId: string, inviteId: string): Promise<void> {
-  const res = await authed(`books/${bookId}/invites/${inviteId}`, { method: 'DELETE' });
-  if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't revoke that invite."));
+export async function revokeInvite(bookId: string): Promise<void> {
+  const res = await authed(`books/${bookId}/invite`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't revoke that link."));
 }
 
 export interface InvitePreview { code: string; bookName: string; members: number; alreadyMember: boolean }
 
 export const previewInvite = async (code: string): Promise<InvitePreview> =>
   json<InvitePreview>(await authed(`invites/${encodeURIComponent(code)}`), "That invite didn't work.");
+
+/**
+ * Sign in against an invite code, making the account if this is a first
+ * visit. The only way into Piggy without an admin running `manage create`,
+ * and it needs a live code — so it is the invited person's front door.
+ */
+export async function claimInvite(code: string, email: string): Promise<CodeRequested> {
+  const res = await fetch(url(`invites/${encodeURIComponent(code)}/claim`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const j = await json<{ verification_id: string; expires_at: string }>(res, "That invite code didn't work.");
+  return { verificationId: j.verification_id, expiresAt: j.expires_at };
+}
 
 export const acceptInvite = async (code: string): Promise<BookSummary> =>
   json<BookSummary>(
