@@ -12,8 +12,9 @@ import {
   submitCode, submitJoinCode, submitSignUp,
 } from './auth';
 import {
-  acceptJoin, banksModal, claim, claimModal, copyInvite, killInvite, kickMember,
-  leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks, shareModal, switchTo,
+  acceptJoin, banksModal, claim, claimModal, confirmDeleteBank, copyInvite, deleteBank,
+  killInvite, kickMember, leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks,
+  shareModal, switchTo,
 } from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { applyTheme } from './theme';
@@ -49,6 +50,8 @@ export function wireEvents(): void {
       case 'book-open': void switchTo(id); return;
       case 'book-new': void newBank(); return;
       case 'book-leave': void leaveBank(); return;
+      case 'book-delete': confirmDeleteBank(); return;
+      case 'book-delete-go': void deleteBank(); return;
       case 'share': void shareModal(); return;
       case 'invite-new': void makeInvite(); return;
       case 'invite-copy': void copyInvite(id); return;
@@ -257,6 +260,10 @@ export function wireEvents(): void {
     if (id === 'authEmail' || id === 'authName' || id === 'authCode' || id === 'authJoinCode') {
       e.preventDefault();
       authEnter(id);
+      return;
     }
+    /* Naming a piggy bank is a one-field form on both the gate and the
+       switcher, so Enter is the obvious way out of it. */
+    if (id === 'bankName') { e.preventDefault(); void newBank(); }
   });
 }

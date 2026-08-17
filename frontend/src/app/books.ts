@@ -8,13 +8,13 @@
  * reached once a backend has answered and somebody is signed in.
  */
 import { S, UI, setState } from './context';
-import { gateError, leaveGate, paintGate, splash } from './gate';
+import { gateError, leaveGate, markBusy, paintGate, splash } from './gate';
 import { hydrate } from './hydrate';
 import { closeModal, head, openModal, toast } from './modals';
 import { render } from './render';
 import { isOwner, lastBook, rememberBook, session } from './session';
 import {
-  ApiError, acceptInvite, claimPerson, createBook, createInvite, getInvite, inviteUrl,
+  ApiError, acceptInvite, claimPerson, createBook, createInvite, deleteBook, getInvite, inviteUrl,
   listBooks, listMembers, previewInvite, removeMember, revokeInvite,
 } from '../storage/api';
 import type { BookSummary, Invite, InvitePreview, Member } from '../storage/api';
@@ -44,7 +44,8 @@ function clearJoinParam(): void {
 
 /**
  * Pick a book and open it: the invite just followed, else the one last open,
- * else the first, else a fresh one. Called straight after sign-in.
+ * else the only one. With none at all we ask rather than make one. Called
+ * straight after sign-in.
  */
 export async function enterBooks(): Promise<void> {
   splash('Fetching your piggy banks…');
@@ -59,13 +60,14 @@ export async function enterBooks(): Promise<void> {
     const wanted = lastBook();
     const remembered = books.find((b) => b.id === wanted);
     if (remembered) { await openBook(remembered); return; }
+    if (!books.length) { firstBankGate(); return; }
     // Nothing remembered and more than one to choose from: ask. Guessing here
     // is the worst kind of wrong — every book is called Piggy until it is
     // renamed, so landing in the private one looks exactly like landing in the
     // shared one, and everything typed into it is invisible to the people you
     // share with.
     if (books.length > 1) { showBankGate(books); return; }
-    await openBook(books[0] || (await createBook('Piggy')));
+    await openBook(books[0]);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) { signedOut(); return; }
     gateError("Can't reach the server 📡", message(err), 'books-retry');
@@ -121,6 +123,27 @@ function showBankGate(books: BookSummary[]): void {
       <p class="sub" style="margin:8px 0 18px;line-height:1.5">You're in more than one. Pick the one you want — this device will remember it.</p>
       <div class="list">${rows}</div>
     </div>`);
+}
+
+/**
+ * Signed in and in no piggy bank at all — a brand-new account, or the last
+ * one just left or deleted. Nothing is made on anybody's behalf here: a book
+ * that appears by itself is how expenses end up somewhere the people you
+ * share with can't see them, and it is named by whoever wanted it.
+ */
+function firstBankGate(error?: string): void {
+  paintGate(`
+    <div class="card" style="margin-top:20px">
+      <h2 style="font-size:22px">Start a piggy bank 🐷</h2>
+      <p class="sub" style="margin:8px 0 18px;line-height:1.5">You're in, but not in a piggy bank yet. Name one and it's yours — the flat, a trip, whatever you're splitting.</p>
+      <div class="field"><label>Piggy bank name</label>
+        <input class="input" id="bankName" placeholder="e.g. Home" autocomplete="off"></div>
+      <button class="btn primary wide" data-act="book-new">Create it</button>
+      ${error ? '<div class="auth-error">' + esc(error) + '</div>' : ''}
+      <div class="hint">Been invited to somebody else's? Open their link and you'll land straight in it — there's no need to make one first.</div>
+    </div>`);
+  const el = $('#bankName') as HTMLInputElement | null;
+  if (el) el.focus();
 }
 
 /* ---------- joining by invite ---------- */
@@ -204,10 +227,21 @@ export async function switchTo(bookId: string): Promise<void> {
   toast("Couldn't open that piggy bank — try again");
 }
 
+/** True while a book is being made, so a double tap can't make two. */
+let making = false;
+
+/**
+ * Make a book from whatever `#bankName` holds. Both doors lead here — the
+ * switcher's "start another one" and the gate shown to somebody who is in
+ * none — so which of the two is on screen decides where an error goes.
+ */
 export async function newBank(): Promise<void> {
+  if (making) return;
   const el = $('#bankName') as HTMLInputElement | null;
   const name = (el ? el.value : '').trim() || 'Piggy';
-  closeModal();
+  const onGate = document.body.classList.contains('gate');
+  making = true;
+  if (onGate) markBusy('Creating…'); else closeModal();
   try {
     const book = await createBook(name);
     setState(blankState());
@@ -215,7 +249,9 @@ export async function newBank(): Promise<void> {
     await openBook(book);
     toast(name + ' is ready 🐷');
   } catch (err) {
-    toast(message(err));
+    if (onGate) firstBankGate(message(err)); else toast(message(err));
+  } finally {
+    making = false;
   }
 }
 
@@ -270,6 +306,12 @@ export async function shareModal(): Promise<void> {
     closeModal(); toast(message(err)); return;
   }
 
+  // The switcher's count came from whenever it last listed; this one is now.
+  book.members = members.length;
+  // A book has to keep an owner, so the only owner cannot leave — deleting is
+  // their way out, and saying so beats a toast from a refused request.
+  const soleOwner = book.role === 'owner' && members.filter((m) => m.role === 'owner').length === 1;
+
   openModal(head('Share ' + esc(book.name)) + `
     <div class="card-head"><h2>👥 Who's in</h2><span class="sub">${members.length}</span></div>
     <div class="list">${members.map((m) => memberRow(m, S.people)).join('')}</div>
@@ -279,7 +321,60 @@ export async function shareModal(): Promise<void> {
       ${inviteBlock(book, invite)}
     ` : '<div class="hint">Only an owner can invite people to this piggy bank.</div>'}
     <div class="divider"></div>
-    <button class="btn danger wide" data-act="book-leave">Leave this piggy bank</button>`);
+    ${soleOwner
+      ? '<div class="hint">You\'re the only owner, so there\'s nobody to leave it to. Deleting is the way out.</div>'
+      : '<button class="btn soft wide" data-act="book-leave">Leave this piggy bank</button>'}
+    ${book.role === 'owner'
+      ? '<button class="btn danger wide" style="margin-top:10px" data-act="book-delete">Delete this piggy bank</button>'
+      : ''}`);
+}
+
+/**
+ * Deleting takes the book away from everyone in it, so the name is typed
+ * rather than a yes tapped — a confirm dialog is one careless tap, and there
+ * is nothing on the far side of this to restore from.
+ */
+export function confirmDeleteBank(): void {
+  const book = session.book;
+  if (!book) { toast('No piggy bank open'); return; }
+  const shared = book.members > 1;
+  openModal(head('Delete ' + esc(book.name) + '?') + `
+    <p class="sub" style="margin:0 0 14px;line-height:1.5">This erases the whole piggy bank — its people, accounts, lists, recurring bills, expenses and repayments${
+      shared ? ', for everyone in it' : ''
+    }. There is no undo.</p>
+    ${shared ? '<div class="hint" style="margin-bottom:14px">' + book.members + ' people are in this one. Leaving instead keeps it standing for them.</div>' : ''}
+    <div class="field"><label>Type the name to confirm</label>
+      <input class="input" id="killName" placeholder="${esc(book.name)}"
+             autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <button class="btn danger wide" data-act="book-delete-go">Delete it for good</button>
+    <div class="row-btns" style="margin-top:12px">
+      <button class="btn soft wide" data-act="close">Keep it</button>
+    </div>`);
+  const el = $('#killName') as HTMLInputElement | null;
+  if (el) el.focus();
+}
+
+export async function deleteBank(): Promise<void> {
+  const book = session.book;
+  if (!book) return;
+  const el = $('#killName') as HTMLInputElement | null;
+  const typed = (el ? el.value : '').trim();
+  if (typed.toLowerCase() !== book.name.trim().toLowerCase()) {
+    toast('Type the name exactly to confirm');
+    return;
+  }
+  try {
+    await deleteBook(book.id);
+    closeModal();
+    rememberBook(null);
+    session.book = null;
+    setState(blankState());
+    UI.ledgerId = null;
+    toast(book.name + ' is gone');
+    await enterBooks();
+  } catch (err) {
+    toast(message(err));
+  }
 }
 
 export async function makeInvite(): Promise<void> {

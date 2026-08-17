@@ -29,6 +29,7 @@ from ledger.service import (
     create_book,
     create_invite,
     current_invite,
+    delete_book,
     ensure_book_for_user,
     invite_by_code,
     member_count,
@@ -201,6 +202,18 @@ def put_book_by_id(
         ) from exc
     _tagged(response, book)
     return merged
+
+
+@router.delete("/books/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_book_by_id(access: OwnerAccess, session: Db) -> None:
+    """Erase a piggy bank and everything in it.
+
+    Owners only, and it takes the book away from everyone who shares it — so
+    the client asks for the name to be typed before it calls this. Leaving is
+    the other door: removing yourself as a member keeps the book standing.
+    """
+    book, _ = access
+    delete_book(session, book)
 
 
 # --------------------------------------------------------------------------

@@ -448,6 +448,27 @@ def replace_book(session: Session, book: Book, state: BookState) -> None:
 
 
 # --------------------------------------------------------------------------
+# Deleting a book
+# --------------------------------------------------------------------------
+
+
+def delete_book(session: Session, book: Book) -> None:
+    """Erase a piggy bank and everything in it, for everyone in it.
+
+    The contents go through the same wipe a full sync does; what is left is
+    the rows that only exist to serve this book — its memberships, its link,
+    and the snapshots kept for merging. There is no undo, which is why the
+    API only lets an owner ask for it.
+    """
+    _wipe_book(session, book)
+    session.exec(delete(BookSnapshot).where(col(BookSnapshot.book_id) == book.id))  # type: ignore[call-overload, arg-type, unused-ignore]
+    session.exec(delete(BookInvite).where(col(BookInvite.book_id) == book.id))  # type: ignore[call-overload, arg-type, unused-ignore]
+    session.exec(delete(BookMember).where(col(BookMember.book_id) == book.id))  # type: ignore[call-overload, arg-type, unused-ignore]
+    session.delete(book)
+    session.commit()
+
+
+# --------------------------------------------------------------------------
 # Versioned sync
 # --------------------------------------------------------------------------
 
