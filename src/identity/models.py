@@ -16,6 +16,9 @@ from core.utils import utcnow
 
 CODE_LENGTH = 6
 
+#: The face a brand-new account wears until its owner picks another.
+DEFAULT_EMOJI = "🙂"
+
 
 class UserRole(enum.StrEnum):
     admin = "admin"
@@ -23,11 +26,19 @@ class UserRole(enum.StrEnum):
 
 
 class User(SQLModel, table=True):
+    """An account, and the small profile that follows it into every book.
+
+    `name` and `emoji` are the profile: they belong to the person, not to any
+    one piggy bank, so making a second book doesn't mean introducing yourself
+    again. They are what the first person in a new book is prefilled from.
+    """
+
     __tablename__ = "users"
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     email: str = Field(unique=True, index=True, max_length=255)
     name: str = Field(max_length=255)
+    emoji: str = Field(default=DEFAULT_EMOJI, max_length=16)
     role: UserRole = Field(default=UserRole.member, index=True)
     is_active: bool = Field(default=True)
     # Stateless force-sign-out: tokens issued before this instant are refused.

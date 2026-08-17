@@ -518,6 +518,29 @@ export async function maybeAskWhoYouAre(): Promise<void> {
   await claimModal();
 }
 
+/**
+ * Link the account to the person it just made for itself, without asking.
+ *
+ * Only ever called with the person onboarding built from the profile — same
+ * name, same face — so there is nothing to ask: the answer was typed into the
+ * box labelled "Your name". Anything else falls back to the question.
+ *
+ * The book is pushed before the claim rather than left to the debounced save:
+ * the server refuses to link an account to a person it hasn't seen yet.
+ */
+export async function adoptPerson(personId: string | null): Promise<void> {
+  const book = session.book;
+  if (!book || !personId) { await maybeAskWhoYouAre(); return; }
+  try {
+    await store.save(S);
+    const me = await claimPerson(book.id, personId);
+    book.personId = me.personId;
+    render();
+  } catch {
+    await maybeAskWhoYouAre();
+  }
+}
+
 export async function claimModal(): Promise<void> {
   const book = session.book;
   if (!book) return;

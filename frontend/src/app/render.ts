@@ -2,7 +2,7 @@
 import type { Expense, Ledger, LedgerItem, MonthKey, Person, Settlement } from '../model/types';
 import { S, UI, account, activeLedger, baseCur, person, rule, save, accountEmoji, accountLabel, toBase } from './context';
 import { COLORS } from './theme';
-import { onServer } from './session';
+import { onServer, profile } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, cents, dayLabel, esc, fromCents, money, monthLabel, monthOf, thisMonth } from '../lib/utils';
 import { computeBalances, categoryTotals, paidByTotals, settlementsFor, simplifyDebts } from '../domain/balances';
@@ -61,9 +61,17 @@ export function renderOnboarding(): void {
   const main = $('#main'); if (!main) return;
   const kept = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]')).map((el) => el.value);
   const hints = ['e.g. Léa', 'e.g. Marc', 'e.g. Sam', 'e.g. Robin'];
+  /* Your account already knows who you are, so the first box opens holding it
+     — name and face both. Nothing on the Pages build, where there is no
+     account to know it, and typing over it is always allowed. */
+  const me = profile();
+  const first = (): string => (kept.length ? kept[0] || '' : me ? me.name : '');
   const boxes = Array.from({ length: obSlots }, (_, i) =>
-    '<div class="field"><label>' + (i === 0 ? 'Your name' : 'Person ' + (i + 1)) + '</label>' +
-    '<input class="input" data-ob="' + i + '" value="' + esc(kept[i] || '') + '" placeholder="' +
+    '<div class="field">' + (i === 0 && me
+      ? '<label style="display:flex;align-items:center;gap:6px">' +
+        '<span class="avatar sm" style="background:var(--tint)">' + esc(me.emoji) + '</span>Your name</label>'
+      : '<label>' + (i === 0 ? 'Your name' : 'Person ' + (i + 1)) + '</label>') +
+    '<input class="input" data-ob="' + i + '" value="' + esc(i === 0 ? first() : kept[i] || '') + '" placeholder="' +
     esc(hints[i] || 'Another name') + '" autocomplete="off"></div>').join('');
 
   main.innerHTML = `
@@ -76,7 +84,9 @@ export function renderOnboarding(): void {
       <select class="input" id="obCur">${['CHF', 'EUR', 'USD', 'GBP'].map((c) => '<option ' + (c === 'CHF' ? 'selected' : '') + '>' + c + '</option>').join('')}</select>
     </div>
     <button class="btn primary wide" data-act="ob-go">Start our piggy bank 🐷</button>
-    <div class="hint">Everyone gets their own money to pay from. Share an account too? Add it under Settings, along with anyone we've missed.</div>
+    <div class="hint">Everyone gets their own money to pay from. Share an account too? Add it under Settings, along with anyone we've missed.${
+      me ? ' Your name and face come from your profile — change them under Settings › Your account.' : ''
+    }</div>
   </div>`;
 }
 
