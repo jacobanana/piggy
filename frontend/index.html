@@ -2,14 +2,60 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--
+  One scale, and it stays there.
+
+  Piggy's input surfaces are fixed overlays — the add sheet, every modal, the
+  FAB. `position: fixed` anchors to the *layout* viewport, so once the visual
+  one is zoomed and panned the sheet's ✕ sits off the side of the screen and no
+  amount of dragging brings it back. The gesture nobody means is the one that
+  does it: two quick taps while entering an amount read as "zoom in here".
+
+  `maximum-scale=1` stops Safari zooming a focused field of its own accord —
+  belt to the braces of the 16px `input` rule further down in styles.css — and
+  `user-scalable=no` is honoured in full only in an installed home-screen app,
+  which is exactly where the fixed shell is the whole screen. In an ordinary
+  Safari tab it is ignored, so pinch-to-zoom stays available where the
+  accessibility case for it is strongest and the chrome is not ours.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Piggy — our shared expenses</title>
 <meta name="description" content="A shared-expenses piggy bank for two: recurring bills, everyday extras and holiday pots, with a running tally of who owes whom.">
+<!-- Kept in step with the open book's paper by applyTheme(); this is the
+     default (blueberry) one, and what the splash screen paints before any
+     script has run. -->
 <meta name="theme-color" content="#F2F4FF">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🐷</text></svg>">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<!--
+  iOS reads this and never the manifest's icons. It is deliberately a square,
+  opaque PNG: iOS applies its own squircle mask, so a pre-rounded icon gets
+  rounded twice and lands on the home screen with four dark notches in it.
+-->
+<link rel="apple-touch-icon" href="apple-touch-icon-180.png">
+
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Piggy">
+<!--
+  `default`, not `black-translucent`.
+
+  Translucent draws the app under the status bar and paints the clock white,
+  which is right for an app with a dark shell and unreadable on Piggy — every
+  theme here is light paper, so white-on-paper would hide the time, the signal
+  and the battery. `default` keeps the status bar out of our box: iOS reserves
+  the strip, safe-area-inset-top comes back 0, and the clock stays legible on
+  all five themes without anything having to branch on which one is on.
+-->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<!-- `crossorigin` so the response is CORS rather than opaque, and the service
+     worker can tell a delivered stylesheet from a failed one before it caches
+     it for good — see fontFirst() in src/sw.ts. -->
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" crossorigin>
 </head>
 <body>
 <header class="topbar">

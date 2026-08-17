@@ -48,7 +48,10 @@ frontend_checks() {
     failures+=("frontend env"); report+=$'\n'"--- frontend env ---"$'\n'"No frontend/node_modules — run 'bash scripts/await_ready.sh' first."$'\n'
     return
   fi
-  run_in frontend "tsc --noEmit (frontend)" npx tsc --noEmit
+  # npm script, not bare tsc: there are two projects to check — the app and the
+  # service worker, which is compiled against WebWorker rather than DOM — and
+  # package.json is the one place that says so.
+  run_in frontend "tsc --noEmit (frontend)" npm run --silent typecheck
   run_in frontend "vitest (frontend)" npm test --silent
 }
 

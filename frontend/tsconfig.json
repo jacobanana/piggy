@@ -12,5 +12,7 @@
     "isolatedModules": true,
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "//": "The worker is checked by tsconfig.worker.json against the WebWorker lib; leaving it here too would check it against the DOM, where `self` is a Window and nothing in sw.ts means what it says.",
+  "exclude": ["src/sw.ts"]
 }

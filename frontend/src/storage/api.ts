@@ -127,20 +127,61 @@ async function json<T>(res: Response, fallback: string): Promise<T> {
 /* ---------- public calls ---------- */
 
 /**
+ * The last answer this browser got at this address, so an unreachable server
+ * is not mistaken for one that was never there.
+ *
+ * Only written when something actually answered. Before the app could open
+ * offline the distinction did not exist — a failed probe meant the page had not
+ * loaded either — but an installed app opens on a train, and a probe that
+ * timed out used to read as "no backend" and drop a signed-in reader into the
+ * localStorage build. That is not a cosmetic wrong: it is a *different, empty
+ * book*, and expenses typed into it are filed where nobody they share with will
+ * ever see them.
+ */
+const BACKEND_KEY = 'piggy.backend.v1';
+
+function rememberBackend(present: boolean): boolean {
+  try {
+    localStorage.setItem(BACKEND_KEY, present ? '1' : '0');
+  } catch { /* private mode: we simply probe again next time */ }
+  return present;
+}
+
+function recallBackend(): boolean {
+  try {
+    return localStorage.getItem(BACKEND_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Is a Piggy backend serving this page? One unauthenticated GET, short
  * timeout, and any non-JSON answer (a static host's 404 page) counts as no.
+ *
+ * The two failure modes are answered differently, which is the whole point:
+ * something that replies and is not Piggy is a definitive no, and is
+ * remembered as one; nothing replying at all is not an answer, so the last
+ * definitive one stands.
  */
 export async function detectBackend(): Promise<boolean> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
   try {
-    const res = await fetch(url('health'), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
-    if (!res.ok) return false;
-    const j = (await res.json()) as { status?: string; openSignup?: boolean };
-    signupOpen = j.openSignup === true;
-    return j.status === 'ok';
-  } catch {
-    return false;
+    let res: Response;
+    try {
+      res = await fetch(url('health'), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    } catch {
+      return recallBackend();   // offline, or timed out — not a verdict
+    }
+    if (!res.ok) return rememberBackend(false);
+    try {
+      const j = (await res.json()) as { status?: string; openSignup?: boolean };
+      signupOpen = j.openSignup === true;
+      return rememberBackend(j.status === 'ok');
+    } catch {
+      return rememberBackend(false);   // answered, but it is not us
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -164,11 +205,24 @@ export async function signUp(email: string, name: string): Promise<CodeRequested
 }
 
 /** Who the stored token belongs to, or null if it no longer signs anyone in. */
-export async function whoami(): Promise<AuthUser | null> {
+/**
+ * Nobody turned us away — we could not ask. Told apart from `null` because the
+ * two want opposite screens: a rejected session belongs at the sign-in form, and
+ * an unreachable server belongs behind a "try again", with the session left
+ * exactly where it was.
+ */
+export const OFFLINE = 'offline';
+
+export async function whoami(): Promise<AuthUser | typeof OFFLINE | null> {
   if (!hasSession()) return null;
+  let res: Response;
   try {
-    const res = await authed('auth/me');
-    if (!res.ok) return null;
+    res = await authed('auth/me');
+  } catch {
+    return OFFLINE;
+  }
+  if (!res.ok) return null;
+  try {
     return (await res.json()) as AuthUser;
   } catch {
     return null;

@@ -24,6 +24,35 @@ Change one, change all three, and prove it with
 localStorage JSON, its export files, and the API body are the same shape —
 that is what keeps the Pages build and the backend build one product.
 
+## THE SECOND INVARIANT: NOTHING NAMES AN ABSOLUTE PATH
+
+Piggy installs as a PWA on both shapes, from one build, and that only works
+because **no URL in the manifest, the service worker or `index.html` starts
+with `/`.** `vite.config.ts` sets `base: './'`; the manifest's `start_url`,
+`scope` and icons are `./…`; `src/sw.ts` resolves everything against
+`new URL('./', self.location.href)`; `app/pwa.ts` and `storage/api.ts` resolve
+against `document.baseURI`. Write `/index.html` anywhere in that chain and the
+Pages build precaches jacobanana.github.io's front page instead of Piggy — and
+the box, where the app *is* at `/`, keeps working, so nothing catches it.
+
+The four pieces:
+
+- `frontend/public/manifest.webmanifest` — relative throughout. JSON has no
+  comments, which is the only reason that rule is written here instead.
+- `frontend/src/sw.ts` — precache the shell, cache-first on hashed assets,
+  navigations answered from cache, `api/` never touched. It is the one file
+  compiled against **WebWorker** rather than DOM (`tsconfig.worker.json`), and
+  the bare `export {}` at the top is what lets its `self` typecheck. It never
+  calls `skipWaiting()` on its own: a waiting worker is offered to the reader by
+  `app/pwa.ts`, because reloading under a half-typed expense is worse than being
+  a version behind.
+- the build step — a plugin in `vite.config.ts` compiles `sw.ts` after the
+  bundle is on disk, injecting the file list that actually shipped and a digest
+  of their contents as the cache version. Nothing to keep in step by hand.
+- `frontend/public/icon.svg` — the drawn mark every PNG is rendered from.
+  Changed it? `npm run icons` (in `frontend/`). The Apple one is deliberately
+  square and opaque: iOS masks it itself, and rounds a rounded icon twice.
+
 ## CODEBASE MAP
 
 - `frontend/src/domain/` — pure maths: splits, balances, recurrence, fx.
@@ -80,3 +109,16 @@ shape.
 - Enums are VARCHAR + CHECK, never native Postgres enums.
 - The Pages build must never require the backend: no unguarded `/api` calls
   in `frontend/src/` outside a storage adapter.
+- **A failed probe is not a verdict.** `detectBackend()` remembers its last
+  definitive answer, because an installed app opens in a tunnel: a timed-out
+  `api/health` used to read as "no backend" and drop a signed-in reader into
+  the localStorage build — a *different, empty book* to type expenses into.
+  Same rule in `whoami()`, which returns `OFFLINE` rather than `null` when it
+  never reached the server, so the session survives.
+- **Never add `overscroll-behavior-y`.** Pull-to-refresh is an overscroll
+  gesture, so `none` and `contain` both take it away — and in an installed
+  home-screen app that pull is the only way to reload anything at all.
+- The iOS status bar is `default`, not `black-translucent`: every Piggy theme
+  is light paper, and translucent paints the clock white.
+- The service worker is production-only. `vite dev` never emits `sw.js`, and a
+  precache answering for files Vite is trying to hot-reload is its own evening.

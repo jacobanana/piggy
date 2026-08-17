@@ -40,6 +40,10 @@ export function wireEvents(): void {
       case 'auth-signup': startSignUp(); return;
       case 'auth-signup-go': void submitSignUp(); return;
       case 'auth-retry': case 'books-retry': retryBooks(); return;
+      /* The offline gate: boot never got far enough to have anything to retry,
+         so the retry is the boot. Works with no signal — the service worker
+         answers the navigation out of its cache. */
+      case 'boot-retry': location.reload(); return;
       case 'signout': closeModal(); doSignOut(); return;
       case 'banks': void banksModal(); return;
       case 'book-open': void switchTo(id); return;
