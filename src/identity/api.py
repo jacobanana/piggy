@@ -14,10 +14,11 @@ from pydantic import BaseModel, EmailStr
 from sqlmodel import Session, select
 
 from core.config import get_settings
+from core.utils import utcnow
 from database.connection import get_session
 from identity.dependencies import get_current_user, get_user_service, token_predates_invalidation
 from identity.jwt_service import JWTService, TokenType
-from identity.models import User
+from identity.models import DEFAULT_EMOJI, User
 from identity.services import LoginCodeService, UserService
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -50,8 +51,27 @@ class UserOut(BaseModel):
     id: UUID
     email: str
     name: str
+    emoji: str = DEFAULT_EMOJI
     role: str
     is_active: bool
+
+
+class ProfileUpdate(BaseModel):
+    """The bits of an account its owner may change themselves."""
+
+    name: str | None = None
+    emoji: str | None = None
+
+
+def user_out(user: User) -> UserOut:
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        emoji=user.emoji,
+        role=user.role.value,
+        is_active=user.is_active,
+    )
 
 
 class TokenResponse(BaseModel):
@@ -68,7 +88,7 @@ def build_token_response(user: User) -> TokenResponse:
         access_token=JWTService.create_token(user.id, user.role.value, TokenType.ACCESS),
         refresh_token=JWTService.create_token(user.id, user.role.value, TokenType.REFRESH),
         expires_in=settings.access_token_expire_minutes * 60,
-        user=UserOut(id=user.id, email=user.email, name=user.name, role=user.role.value, is_active=user.is_active),
+        user=user_out(user),
     )
 
 
@@ -138,13 +158,33 @@ def refresh_token(
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: Annotated[User, Depends(get_current_user)]) -> UserOut:
-    return UserOut(
-        id=current_user.id,
-        email=current_user.email,
-        name=current_user.name,
-        role=current_user.role.value,
-        is_active=current_user.is_active,
-    )
+    return user_out(current_user)
+
+
+@router.patch("/me", response_model=UserOut)
+def update_me(
+    body: ProfileUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> UserOut:
+    """Edit your own profile: the name and face every piggy bank starts you with.
+
+    The address is not editable here — it is the credential, so changing it is
+    changing which mailbox signs you in.
+    """
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="A name can't be empty.")
+        current_user.name = name[:255]
+    if body.emoji is not None:
+        # Empty means "back to the default face" rather than a nameless blank.
+        current_user.emoji = body.emoji.strip()[:16] or DEFAULT_EMOJI
+    current_user.updated_at = utcnow()
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return user_out(current_user)
 
 
 # --- dev-only login (mounted conditionally by the composition root) ----------
@@ -159,7 +199,7 @@ class DevLoginRequest(BaseModel):
 @dev_router.get("/users", response_model=list[UserOut])
 def dev_users(session: Annotated[Session, Depends(get_session)]) -> list[UserOut]:
     users = session.exec(select(User).where(User.is_active == True)).all()  # noqa: E712
-    return [UserOut(id=u.id, email=u.email, name=u.name, role=u.role.value, is_active=u.is_active) for u in users]
+    return [user_out(u) for u in users]
 
 
 @dev_router.post("/login", response_model=TokenResponse)

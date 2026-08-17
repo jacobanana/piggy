@@ -148,3 +148,49 @@ def test_signup_can_be_switched_off(client, session, monkeypatch):
 
 def test_health_says_whether_the_door_is_open(client):
     assert client.get("/api/health").json() == {"status": "ok", "openSignup": True}
+
+
+# --------------------------------------------------------------------------
+# The profile: the name and face that follow an account into every book
+# --------------------------------------------------------------------------
+
+
+def test_profile_travels_with_the_account(client, session):
+    """A face on the account, so a second piggy bank needn't be told who you are."""
+    make_user(session)
+    tokens = sign_in(client, session, "lea@example.com")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert tokens["user"]["emoji"] == "🙂"  # the face a new account is born with
+
+    resp = client.patch("/api/auth/me", json={"name": "Léa B", "emoji": "🦊"}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "Léa B"
+    assert resp.json()["emoji"] == "🦊"
+
+    me = client.get("/api/auth/me", headers=headers).json()
+    assert (me["name"], me["emoji"]) == ("Léa B", "🦊")
+
+
+def test_profile_edits_one_field_at_a_time(client, session):
+    make_user(session)
+    tokens = sign_in(client, session, "lea@example.com")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert client.patch("/api/auth/me", json={"emoji": "🐼"}, headers=headers).json()["name"] == "Léa"
+    assert client.patch("/api/auth/me", json={"name": "Léa B"}, headers=headers).json()["emoji"] == "🐼"
+
+
+def test_profile_refuses_a_blank_name_and_falls_back_on_a_blank_face(client, session):
+    make_user(session)
+    tokens = sign_in(client, session, "lea@example.com")
+    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+    assert client.patch("/api/auth/me", json={"name": "   "}, headers=headers).status_code == 400
+    assert client.patch("/api/auth/me", json={"emoji": " "}, headers=headers).json()["emoji"] == "🙂"
+    assert client.get("/api/auth/me", headers=headers).json()["name"] == "Léa"
+
+
+def test_profile_is_yours_alone(client, session):
+    make_user(session)
+    assert client.patch("/api/auth/me", json={"name": "Nobody"}).status_code == 401

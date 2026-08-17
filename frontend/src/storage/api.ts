@@ -15,10 +15,16 @@ const PROBE_TIMEOUT_MS = 3000;
 const API_BASE = new URL('api/', document.baseURI).toString();
 const url = (path: string): string => API_BASE + path;
 
+/**
+ * The account, and the profile that rides along with it: `name` and `emoji`
+ * belong to the person rather than to any one piggy bank, which is what lets
+ * a brand-new book prefill its first person from them.
+ */
 export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  emoji: string;
   role: string;
 }
 
@@ -71,8 +77,20 @@ export const signOut = (): void => setTokens(null);
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
-  user: { id: string; email: string; name: string; role: string };
+  user: Partial<AuthUser> & { id: string; email: string };
 }
+
+/** The face an account wears until its owner picks another. Mirrors the backend. */
+export const DEFAULT_FACE = '🙂';
+
+/** A user row off the wire, with the profile bits an older server may omit. */
+const asUser = (u: Partial<AuthUser> & { id: string; email: string }): AuthUser => ({
+  id: u.id,
+  email: u.email,
+  name: u.name || u.email.split('@')[0],
+  emoji: u.emoji || DEFAULT_FACE,
+  role: u.role || 'member',
+});
 
 async function detailOf(res: Response, fallback: string): Promise<string> {
   try {
@@ -223,11 +241,23 @@ export async function whoami(): Promise<AuthUser | typeof OFFLINE | null> {
   }
   if (!res.ok) return null;
   try {
-    return (await res.json()) as AuthUser;
+    return asUser((await res.json()) as AuthUser);
   } catch {
     return null;
   }
 }
+
+/**
+ * Change your own name or face. It is the profile, not this book's person —
+ * every piggy bank you make from here on starts you off with it.
+ */
+export const updateProfile = async (patch: { name?: string; emoji?: string }): Promise<AuthUser> =>
+  asUser(
+    await json<AuthUser>(
+      await authed('auth/me', { method: 'PATCH', body: JSON.stringify(patch) }),
+      "Couldn't save your profile.",
+    ),
+  );
 
 export async function requestCode(email: string): Promise<CodeRequested> {
   const res = await fetch(url('auth/code/request'), {
@@ -247,7 +277,7 @@ export async function verifyCode(verificationId: string, code: string): Promise<
   });
   const j = await json<TokenResponse>(res, 'That code did not work.');
   setTokens({ access: j.access_token, refresh: j.refresh_token });
-  return j.user;
+  return asUser(j.user);
 }
 
 /* ---------- books ---------- */

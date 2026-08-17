@@ -21,6 +21,28 @@ export const session: Session = { mode: 'local', user: null, book: null };
 export const onServer = (): boolean => session.mode === 'server';
 
 /**
+ * The signed-in account's profile: the name and face that belong to the
+ * person rather than to a piggy bank, and that a brand-new book starts its
+ * first person from. Null on the Pages build, where there is no account —
+ * onboarding there asks for a name the way it always has.
+ */
+export const profile = (): { name: string; emoji: string } | null =>
+  session.user ? { name: session.user.name, emoji: session.user.emoji } : null;
+
+/**
+ * The profile's face, if a person about to be created under `name` is the
+ * signed-in reader — that is, if the name is still the profile's own.
+ *
+ * Null is "somebody else": the box was prefilled with your name and typed
+ * over, so the profile face would be a lie and the account must not be linked
+ * to that person without asking.
+ */
+export function faceForName(name: string): string | null {
+  const me = profile();
+  return me && me.name && name.trim() === me.name.trim() ? me.emoji : null;
+}
+
+/**
  * The open book's name is held twice: `session.book.name`, which the switcher
  * and the share sheet read, and `meta.appName` in the state, which is the same
  * field on the wire — the sync endpoint writes it straight to `Book.name`.

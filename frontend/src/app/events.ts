@@ -3,8 +3,8 @@ import { S, UI, account, activeLedger, ledger, person, rule, save } from './cont
 import { addOnboardSlot, commit, render } from './render';
 import {
   F, accountForm, addChooser, closeModal, doSettle, expenseForm, ledgerForm, occurrenceModal,
-  onboard, personForm, refreshPickBox, refreshSplit, ruleForm, rulesModal, saveAccount, saveExpense,
-  saveLedger, saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal,
+  onboard, personForm, profileForm, refreshPickBox, refreshSplit, ruleForm, rulesModal, saveAccount,
+  saveExpense, saveLedger, saveOccurrence, savePerson, saveProfile, saveRule, saveSettings, saveSettlement, settingsModal,
   settleModal, settlementForm, syncPickedAmount, toast,
 } from './modals';
 import {
@@ -12,8 +12,8 @@ import {
   submitCode, submitJoinCode, submitSignUp,
 } from './auth';
 import {
-  acceptJoin, banksModal, claim, claimModal, confirmDeleteBank, copyInvite, deleteBank,
-  killInvite, kickMember, leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks,
+  acceptJoin, adoptPerson, banksModal, claim, claimModal, confirmDeleteBank, copyInvite, deleteBank,
+  killInvite, kickMember, leaveBank, makeInvite, newBank, retryBooks,
   shareModal, switchTo,
 } from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
@@ -93,6 +93,9 @@ export function wireEvents(): void {
       case 'edit-rule': ruleForm(rule(id)); return;
       case 'settings': settingsModal(); return;
       case 'save-settings': saveSettings(); return;
+      /* Your account's own name and face, not this book's person. */
+      case 'profile': profileForm(); return;
+      case 'save-profile': void saveProfile(); return;
       case 'open':
         if (el.dataset.kind === 'recurring') occurrenceModal(id);
         else expenseForm(S.expenses.find((x) => x.id === id));
@@ -232,8 +235,9 @@ export function wireEvents(): void {
         }
         return;
       /* The people only exist once onboarding runs, so this is the first
-         moment the book's creator can say which of them is them. */
-      case 'ob-go': onboard(); void maybeAskWhoYouAre(); return;
+         moment the book's creator can be linked to one of them — the person
+         built from their profile, or the question when it wasn't. */
+      case 'ob-go': void adoptPerson(onboard()); return;
       case 'ob-more': addOnboardSlot(); return;
     }
   });

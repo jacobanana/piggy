@@ -3,7 +3,8 @@ import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Sp
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
-import { myPersonId, onServer, session, syncBookName } from './session';
+import { faceForName, myPersonId, onServer, profile, session, syncBookName } from './session';
+import { DEFAULT_FACE, updateProfile } from '../storage/api';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
@@ -688,8 +689,13 @@ export function settingsModal(): void {
     <div class="hint">Empties this piggy bank without getting rid of it${onServer() ? ' — deleting it for good is under Your piggy banks' : ''}.</div>
     <input type="file" id="importFile" accept="application/json" style="display:none">
     ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Your account</h2></div>' +
-      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>. ' +
-      'Yours across every piggy bank, not this one\'s.</div>' +
+      '<div class="list"><div class="item" data-act="profile">' +
+      '<span class="avatar lg" style="background:var(--tint);border-color:var(--ink)">' + esc(myProfile().emoji) + '</span>' +
+      '<div class="item-main"><div class="name">' + esc(myProfile().name) + '</div>' +
+      '<div class="meta"><span>' + esc(session.user ? session.user.email : '') + '</span></div></div>' +
+      '<span class="sub">edit</span></div></div>' +
+      '<div class="hint">Your name and face, yours across every piggy bank rather than this one\'s. ' +
+      'A new piggy bank starts its first person off with them.</div>' +
       '<div class="row-btns" style="margin-top:12px">' +
       '<button class="btn soft" data-act="banks">🏦 Your piggy banks</button>' +
       '<button class="btn soft" data-act="signout">Sign out</button></div>' +
@@ -715,21 +721,32 @@ export function saveSettings(): void {
 }
 
 /* ---------- person / account forms ---------- */
+
+/** Every face on offer — for a person in a book, and for your own profile. */
+export const FACES = [
+  '🙂', '😎', '🐐', '🐰', '🦊', '🐻', '🐼', '🐨',
+  '🦁', '🐯', '🐮', '🐷', '🐶', '🐱', '🐵', '🐸',
+  '🐧', '🦉', '🦆', '🐔', '🦄', '🦌', '🦥', '🦔',
+  '🦦', '🐘', '🐙', '🦋', '🐝', '🐢', '🐳', '🐬',
+  '🦈', '🦖', '🦩', '🦜', '🌻', '🌙', '⭐', '🍀',
+  '🍓', '🫐',
+];
+
+/** The face grid, wired to `F.emoji`. Shared by the person and profile forms. */
+export function facePicker(chosen: string | undefined): string {
+  const faces = chosen && !FACES.includes(chosen) ? [chosen, ...FACES] : FACES;
+  return '<div class="emopick" id="emoPick">' + faces.map((e) =>
+    '<button type="button" data-act="emo" data-v="' + esc(e) + '" class="' + (e === chosen ? 'on' : '') + '">' +
+    esc(e) + '</button>').join('') + '</div>';
+}
+
 export function personForm(p?: Person): void {
   const isNew = !p;
   const x: Partial<Person> = p || { name: '', emoji: '🙂', color: COLORS[S.people.length % COLORS.length] };
   F.emoji = x.emoji; F.color = x.color;
-  const faces = [
-    '🙂', '😎', '🐐', '🐰', '🦊', '🐻', '🐼', '🐨',
-    '🦁', '🐯', '🐮', '🐷', '🐶', '🐱', '🐵', '🐸',
-    '🐧', '🦉', '🦆', '🐔', '🦄', '🦌', '🦥', '🦔',
-    '🦦', '🐘', '🐙', '🦋', '🐝', '🐢', '🐳', '🐬',
-    '🦈', '🦖', '🦩', '🦜', '🌻', '🌙', '⭐', '🍀',
-    '🍓', '🫐',
-  ];
   openModal(head(isNew ? 'Add someone' : 'Edit ' + esc(x.name || '')) + `
     <div class="field"><label>Name</label><input class="input" id="pName" value="${esc(x.name)}" autocomplete="off"></div>
-    <div class="field"><label>Face</label><div class="emopick" id="emoPick">${faces.map((e) => '<button type="button" data-act="emo" data-v="' + e + '" class="' + (e === x.emoji ? 'on' : '') + '">' + e + '</button>').join('')}</div></div>
+    <div class="field"><label>Face</label>${facePicker(x.emoji)}</div>
     <div class="field"><label>Colour</label><div class="chips" id="colorPick">${COLORS.map((c) => '<button type="button" data-act="color" data-v="' + c + '" class="chip ' + (c === x.color ? 'on' : '') + '"><span class="avatar sm" style="background:' + c + '"></span></button>').join('')}</div></div>
     <div class="row-btns"><button class="btn primary" style="flex:1" data-act="save-person" data-id="${x.id || ''}">Save</button>
     ${x.id && S.people.length > 1 ? '<button class="btn danger" data-act="del-person" data-id="' + x.id + '">Remove</button>' : ''}</div>`);
@@ -752,6 +769,39 @@ export function savePerson(id?: string): void {
   }
   closeModal(); commit(); settingsModal();
 }
+/* ---------- your profile: the you that every piggy bank starts from ---------- */
+
+/** The signed-in profile, with something sane to show before one is loaded. */
+export const myProfile = (): { name: string; emoji: string } =>
+  profile() || { name: '', emoji: DEFAULT_FACE };
+
+/**
+ * Your own name and face. Not a person in this book — those belong to the
+ * book and to everyone sharing it — but the account's, which is why it sits
+ * under "Your account" and follows you into every piggy bank you make.
+ */
+export function profileForm(): void {
+  const me = myProfile();
+  F.emoji = me.emoji;
+  openModal(head('Your profile') + `
+    <p class="sub" style="margin:0 0 14px;line-height:1.5">This is you, in every piggy bank rather than this one. Start a new one and its first person comes ready with this name and face.</p>
+    <div class="field"><label>Name</label><input class="input" id="profName" value="${esc(me.name)}" autocomplete="name"></div>
+    <div class="field"><label>Face</label>${facePicker(me.emoji)}</div>
+    <button class="btn primary wide" data-act="save-profile">Save profile</button>
+    <div class="hint">People already in your piggy banks stay exactly as they are — renaming yourself here doesn't rename them, because they're the bank's and everyone in it can see them.</div>`);
+}
+
+export async function saveProfile(): Promise<void> {
+  const name = ($('#profName') as HTMLInputElement).value.trim();
+  if (!name) { toast('What should we call you?'); return; }
+  try {
+    session.user = await updateProfile({ name, emoji: F.emoji || DEFAULT_FACE });
+  } catch (err) {
+    toast(err instanceof Error ? err.message : "Couldn't save your profile."); return;
+  }
+  closeModal(); settingsModal(); toast('Saved 👤');
+}
+
 export function accountForm(a?: Account): void {
   const isNew = !a;
   const x: Partial<Account> = a || { name: 'Joint account', kind: 'joint', ownership: evenOwnership() };
@@ -810,15 +860,30 @@ export function addChooser(): void {
 /** Faces handed out in order as the onboarding list grows. */
 export const OB_FACES = ['🐐', '🦊', '🐻', '🐼', '🐨', '🦁', '🐧', '🦉', '🦄', '🐰', '🦋', '🐙'];
 
-export function onboard(): void {
-  const typed = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]'))
-    .map((el) => el.value.trim())
-    .filter(Boolean);
+/**
+ * Fill the book with the people it starts with, and hand back the one that is
+ * the reader — or null when nothing here says which of them that is.
+ *
+ * The first box is theirs: it opens holding the profile's name and face, so a
+ * second piggy bank doesn't mean introducing yourself again. Type somebody
+ * else's name over it and the match is off — the profile face is dropped and
+ * the caller goes back to asking which person you are, because a book where
+ * you are quietly somebody else is worse than one question.
+ */
+export function onboard(): string | null {
+  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>('[data-ob]'));
+  const typed = boxes.map((el) => el.value.trim()).filter(Boolean);
   const names = typed.length ? typed : ['Me', 'You'];
+  const myFace = faceForName(names[0]);
   S.settings.baseCurrency = ($('#obCur') as HTMLSelectElement).value;
   S.settings.rates[S.settings.baseCurrency] = 1;
+  let myPerson: string | null = null;
   names.forEach((name, i) => {
-    const p: Person = { id: uid('per_'), name, emoji: OB_FACES[i % OB_FACES.length], color: COLORS[i % COLORS.length] };
+    const mine = i === 0 && myFace !== null;
+    const p: Person = {
+      id: uid('per_'), name, emoji: mine ? myFace! : OB_FACES[i % OB_FACES.length], color: COLORS[i % COLORS.length],
+    };
+    if (mine) myPerson = p.id;
     S.people.push(p);
     S.accounts.push({ id: uid('acc_'), name: name + "'s money", kind: 'personal', ownership: { [p.id]: 1 } });
   });
@@ -833,4 +898,5 @@ export function onboard(): void {
   S.ledgers.push(home);
   UI.ledgerId = home.id;
   commit(); toast('Welcome in 🐷');
+  return myPerson;
 }
