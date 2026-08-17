@@ -1,0 +1,16 @@
+{
+  "//": "The service worker, checked on its own. WebWorker rather than DOM: a worker has no document, and with both libs loaded `self` means the wrong thing and every mistake in sw.ts typechecks clean. src/sw.ts is excluded from tsconfig.json for the same reason, so `npm run typecheck` runs both.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "WebWorker"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src/sw.ts"]
+}

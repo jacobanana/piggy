@@ -2,14 +2,15 @@ import './styles.css';
 import { setState } from './app/context';
 import { enterBooks, setPendingJoin } from './app/books';
 import { wireEvents } from './app/events';
-import { leaveGate, splash } from './app/gate';
+import { gateError, leaveGate, splash } from './app/gate';
 import { fatal, hydrate } from './app/hydrate';
 import { sessionExpired, signInScreen } from './app/auth';
 import { toast } from './app/modals';
+import { initPwa } from './app/pwa';
 import { adoptRemote, pull, startSync } from './app/sync';
 import { session } from './app/session';
 import { blankState } from './model/state';
-import { detectBackend, hasSession, whoami } from './storage/api';
+import { OFFLINE, detectBackend, hasSession, whoami } from './storage/api';
 import { store } from './storage/store';
 import type { SyncDetail } from './storage/store';
 
@@ -54,12 +55,17 @@ async function boot(): Promise<void> {
 
   if (!backend) {
     session.mode = 'local';
+    initPwa();
     leaveGate();
     hydrate(local);
     return;
   }
 
   session.mode = 'server';
+  /* After the mode is known, never before: the install suggestion says
+     something different where the book lives in this browser and nowhere
+     else. */
+  initPwa();
   /* An invite link is followed after sign-in, never before: previewing one
      needs an account, so a stranger with a code learns nothing. */
   setPendingJoin(new URL(location.href).searchParams.get('join'));
@@ -68,6 +74,14 @@ async function boot(): Promise<void> {
   if (!hasSession()) { signInScreen(); return; }
   splash('Signing you in…');
   const user = await whoami();
+  /* Installed, this is the tunnel: the shell came out of the cache and the
+     server is not there. The session is still good, so it is kept and the
+     reader is told to come back — showing the sign-in form instead would be
+     asking them to do the one thing that cannot work without a network. */
+  if (user === OFFLINE) {
+    gateError("You're offline", 'Piggy needs the network to open your shared book. Everything is still on the server — try again once you have signal.', 'boot-retry');
+    return;
+  }
   if (!user) { signInScreen(); return; }
   session.user = user;
   await enterBooks();

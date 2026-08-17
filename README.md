@@ -7,6 +7,8 @@ every repayment between you. Multi-currency, with its own exchange rates.
 
 **Live (frontend-only):** https://jacobanana.github.io/piggy/
 Everything stays in your browser's localStorage; export/import JSON any time.
+Add it to your home screen and it opens full screen and works with no signal —
+on an iPhone that is also what stops iOS clearing the book after a week unused.
 
 ## Two shapes, one product
 
@@ -15,6 +17,7 @@ Everything stays in your browser's localStorage; export/import JSON any time.
 | Frontend | Vite + TypeScript, no framework | the same build, served by the backend |
 | Persistence | localStorage + JSON export | Postgres via `GET/PUT /api/book` |
 | Auth | none | passwordless email codes → JWT |
+| Installable | yes — home screen, offline, no backend | yes — the book still needs the network |
 | Shipped by | `release.yml` → GitHub Pages | `release.yml` → a GHCR image → [mixedmode-deploy](https://github.com/jacobanana/mixedmode-deploy) |
 
 Both ship from the same green commit on every push to `main`. The self-hosted

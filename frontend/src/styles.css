@@ -20,8 +20,42 @@
   --body:'Nunito', ui-rounded, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono:'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+/*
+ * How far the phone's own chrome reaches into the page.
+ *
+ * These cannot live with the palette above: the theme's colours are set from
+ * JavaScript, and `env()` is resolved by the browser against the device, so it
+ * has no value to publish. Off a home screen every inset is 0 and the padding
+ * below costs nothing — which is why none of it is behind a media query or an
+ * iOS test. There is no platform branch here to keep in step.
+ *
+ * The sides matter as much as the bottom, and only in landscape: turn an
+ * iPhone and the notch eats into one edge of the page, which is where the
+ * topbar's ⚙️ went.
+ */
+:root{
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --safe-left:env(safe-area-inset-left,0px);
+  --safe-right:env(safe-area-inset-right,0px);
+}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
+html{
+  /* No double-tap zoom. The viewport meta refuses the scale; this refuses the
+     gesture that asks for it. `manipulation` keeps panning and pinch and drops
+     only the double tap — the one that fires while somebody taps an amount
+     twice and strands a fixed sheet off the side of the screen. */
+  touch-action:manipulation;
+  /* Rotating an iPhone otherwise inflates the text on its own, which is a
+     second scale change the fixed shell has no answer to. */
+  -webkit-text-size-adjust:100%;
+  text-size-adjust:100%;
+  /* Deliberately no `overscroll-behavior-y` here — do not add one. Pull-to-
+     refresh *is* an overscroll gesture, so `none` or `contain` takes it away,
+     and in an installed home-screen app the pull is the only way to reload a
+     page at all: there is no address bar to hit return in. */
+}
 body{
   font-family:var(--body);
   color:var(--ink);
@@ -32,7 +66,8 @@ body{
     var(--paper);
   background-attachment:fixed;
   -webkit-font-smoothing:antialiased;
-  padding-bottom:96px;
+  /* Room for the FAB, plus the home indicator it now sits above. */
+  padding-bottom:calc(96px + var(--safe-bottom));
 }
 h1,h2,h3,h4{font-family:var(--display);font-weight:600;margin:0;letter-spacing:.1px}
 button{font-family:inherit;color:inherit}
@@ -40,15 +75,15 @@ input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
 :focus-visible{outline:3px solid var(--sky);outline-offset:2px;border-radius:8px}
 
 /* ---------- layout ---------- */
-.wrap{max-width:760px;margin:0 auto;padding:0 16px}
-.topbar{position:sticky;top:0;z-index:40;backdrop-filter:blur(10px);background:var(--paperA);border-bottom:2px solid var(--line)}
-.topbar-in{max-width:760px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:10px}
+.wrap{max-width:760px;margin:0 auto;padding:0 calc(16px + var(--safe-right)) 0 calc(16px + var(--safe-left))}
+.topbar{position:sticky;top:0;z-index:40;backdrop-filter:blur(10px);background:var(--paperA);border-bottom:2px solid var(--line);padding-top:var(--safe-top)}
+.topbar-in{max-width:760px;margin:0 auto;padding:10px calc(16px + var(--safe-right)) 10px calc(16px + var(--safe-left));display:flex;align-items:center;gap:10px}
 .brand{display:flex;align-items:center;gap:8px;font-family:var(--display);font-size:20px;font-weight:700}
 .brand .pig{font-size:22px;display:inline-block;transform:rotate(-6deg)}
 .spacer{flex:1}
 .icon-btn{width:38px;height:38px;border-radius:12px;border:2px solid var(--ink);background:var(--card);cursor:pointer;font-size:16px;display:grid;place-items:center;box-shadow:2px 2px 0 var(--ink);transition:transform .12s ease, box-shadow .12s ease}
 .icon-btn:hover{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
-.ledger-bar{display:flex;gap:8px;overflow-x:auto;padding:10px 16px 12px;max-width:760px;margin:0 auto;scrollbar-width:none}
+.ledger-bar{display:flex;gap:8px;overflow-x:auto;padding:10px calc(16px + var(--safe-right)) 12px calc(16px + var(--safe-left));max-width:760px;margin:0 auto;scrollbar-width:none}
 .ledger-bar::-webkit-scrollbar{display:none}
 /* the sign-in gate: no book on screen, so the chrome has nothing to act on */
 body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none}
@@ -152,13 +187,19 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .btn.wide{width:100%}
 .btn.sm{padding:6px 10px;font-size:13px;border-radius:10px}
 .row-btns{display:flex;gap:8px;flex-wrap:wrap}
-.fab{position:fixed;right:max(16px,calc(50% - 380px + 16px));bottom:20px;z-index:35;border:2.5px solid var(--ink);background:var(--accent);color:#fff;border-radius:999px;padding:14px 20px;font-family:var(--display);font-weight:700;font-size:16px;cursor:pointer;box-shadow:var(--hard);display:flex;align-items:center;gap:8px}
+.fab{position:fixed;right:max(calc(16px + var(--safe-right)),calc(50% - 380px + 16px));bottom:calc(20px + var(--safe-bottom));z-index:35;transition:bottom .18s ease;border:2.5px solid var(--ink);background:var(--accent);color:#fff;border-radius:999px;padding:14px 20px;font-family:var(--display);font-weight:700;font-size:16px;cursor:pointer;box-shadow:var(--hard);display:flex;align-items:center;gap:8px}
 .fab:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
 
 /* ---------- modal ---------- */
 .backdrop{position:fixed;inset:0;background:rgba(43,36,64,.45);z-index:60;display:flex;align-items:flex-end;justify-content:center;padding:0;overflow-y:auto;animation:fade .15s ease}
 @keyframes fade{from{opacity:0}to{opacity:1}}
-.modal{background:var(--card);border:2.5px solid var(--ink);border-radius:22px 22px 0 0;width:100%;max-width:560px;padding:18px 16px 26px;animation:up .2s cubic-bezier(.2,.9,.3,1);max-height:94vh;overflow-y:auto}
+/* The sheet's floor clears the home indicator, and its ceiling is measured in
+   `svh` on purpose: `vh` on iOS is the viewport with the browser chrome hidden,
+   so a sheet capped at 94vh is taller than what is actually on screen and its
+   top — the title and the ✕ — is cut off. `svh` is the small viewport, the one
+   that is always visible. The `vh` line above it is the fallback for browsers
+   that have never heard of `svh`. */
+.modal{background:var(--card);border:2.5px solid var(--ink);border-radius:22px 22px 0 0;width:100%;max-width:560px;padding:18px 16px calc(26px + var(--safe-bottom));animation:up .2s cubic-bezier(.2,.9,.3,1);max-height:94vh;max-height:94svh;overflow-y:auto}
 @keyframes up{from{transform:translateY(28px)}to{transform:translateY(0)}}
 @media(min-width:620px){
   .backdrop{align-items:center;padding:20px}
@@ -198,7 +239,32 @@ select.input{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg 
 .bar span{display:block;height:100%}
 .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:12px;font-weight:700;color:var(--ink-soft)}
 .legend i{width:9px;height:9px;border-radius:3px;display:inline-block;margin-right:5px}
-.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:999px;font-weight:700;font-size:14px;z-index:90;box-shadow:0 6px 20px rgba(43,36,64,.3);animation:up .2s ease}
+.toast{position:fixed;left:50%;bottom:calc(26px + var(--safe-bottom));transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:999px;font-weight:700;font-size:14px;z-index:90;box-shadow:0 6px 20px rgba(43,36,64,.3);animation:up .2s ease}
+/* A toast that waits to be answered rather than fading: the new-version offer.
+   Same pill, plus the button, and it sits above the FAB rather than beside it. */
+.toast-action{display:flex;align-items:center;gap:10px;padding:9px 9px 9px 18px}
+.toast-action .btn{background:var(--card);color:var(--ink);border-color:var(--card);box-shadow:none}
+
+/* ---------- the install suggestion ---------- */
+.pwa-banner{position:fixed;left:0;right:0;bottom:0;z-index:80;display:flex;justify-content:center;padding:12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));pointer-events:none;animation:up .22s cubic-bezier(.2,.9,.3,1)}
+.pwa-card{pointer-events:auto;width:100%;max-width:560px;display:flex;align-items:flex-start;gap:10px;background:var(--card);border:2.5px solid var(--ink);border-radius:var(--r);padding:12px 12px 12px 14px;box-shadow:var(--hard)}
+.pwa-pig{font-size:24px;line-height:1.1;transform:rotate(-6deg)}
+.pwa-copy{flex:1;min-width:0;font-size:14px;line-height:1.45}
+.pwa-copy b{font-family:var(--display);font-weight:600;font-size:15px}
+.pwa-how{margin:3px 0 0;color:var(--ink-soft);font-weight:600;font-size:13px}
+.pwa-why{margin:5px 0 0;color:var(--ink-soft);font-weight:600;font-size:12px;line-height:1.4}
+/* The platform's own affordance, drawn as a key rather than described, so the
+   share icon in the sentence is the one on the button they are looking for. */
+.pwa-key{display:inline-block;border:1.5px solid var(--line);border-radius:6px;padding:0 5px;font-weight:800;color:var(--ink)}
+.pwa-card .btn.sm{flex:none;align-self:center}
+.pwa-x{flex:none;width:30px;height:30px;font-size:13px;box-shadow:none;border-color:var(--line)}
+/* While the suggestion is up it owns the bottom edge, so the FAB and the end of
+   the page both step over it rather than disappearing behind the card. The
+   height is published by trackBannerHeight() in app/pwa.ts, because the card is
+   two lines on Android and four on an iPhone — a constant here was wrong the
+   first time it met the iOS copy. */
+body.pwa-suggest .fab{bottom:calc(20px + var(--safe-bottom) + var(--pwa-banner-h,0px) + 10px)}
+body.pwa-suggest{padding-bottom:calc(96px + var(--safe-bottom) + var(--pwa-banner-h,0px))}
 .center{text-align:center}
 .mono{font-family:var(--mono)}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
