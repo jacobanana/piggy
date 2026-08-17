@@ -83,6 +83,23 @@ def test_book_list_starts_with_the_default_book(client, session):
     assert books[0]["members"] == 1
 
 
+def test_a_summary_counts_members_and_owners(client, session):
+    """The switcher offers "leave" from these two — a book keeps one owner,
+    so the only owner is offered "delete" instead of a refused request."""
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea")
+    alone = client.get("/api/books", headers=lea).json()[0]
+    assert (alone["members"], alone["owners"], alone["role"]) == (1, 1, "owner")
+
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
+    marc = auth(client, session, "marc@example.com")
+    joined = client.post(f"/api/invites/{code}/accept", headers=marc).json()
+
+    assert (joined["members"], joined["owners"], joined["role"]) == (2, 1, "member")
+    shared = client.get("/api/books", headers=lea).json()[0]
+    assert (shared["members"], shared["owners"]) == (2, 1)
+
+
 def test_a_user_can_hold_several_books(client, session):
     headers = auth(client, session, "lea@example.com")
     client.get("/api/book", headers=headers)

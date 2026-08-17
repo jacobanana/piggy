@@ -291,6 +291,8 @@ export interface BookSummary {
   name: string;
   role: 'owner' | 'member';
   members: number;
+  /** How many members own it — a book keeps one, so its only owner can't leave. */
+  owners: number;
   personId: string | null;
 }
 

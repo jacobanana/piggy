@@ -617,9 +617,20 @@ export function saveLedger(id?: string): void {
 }
 
 /* ---------- settings ---------- */
+/**
+ * Two zones, in this order and never mixed: everything this piggy bank keeps
+ * for itself, then the handful of things that are yours across all of them.
+ * They used to be interleaved, so "Piggy banks" and "Sign out" sat under the
+ * same sheet as this book's people and rates and read as its settings too.
+ * Which bank you are in, and what happens to it, is the switcher's job now.
+ */
 export function settingsModal(): void {
   const rates = Array.from(new Set([...S.settings.currencies, ...Object.keys(S.settings.rates)])).filter((c) => c !== baseCur());
   openModal(head('Settings') + `
+    <div class="card-head"><h2>🐷 ${esc(S.meta.appName || 'This piggy bank')}</h2></div>
+    <div class="hint" style="margin:-8px 0 14px">${onServer()
+      ? 'Everything down to “Your account” belongs to this piggy bank alone — its name, people, accounts, currencies and look. The others keep their own.'
+      : 'The people, accounts, currencies and look this piggy bank keeps.'}</div>
     <div class="field"><label>Piggy bank name</label><input class="input" id="sName" value="${esc(S.meta.appName)}"></div>
     <div class="divider"></div>
     <div class="card-head"><h2>👫 Us</h2><button class="btn soft sm" data-act="new-person">＋ Add</button></div>
@@ -642,7 +653,7 @@ export function settingsModal(): void {
     <div class="field"><label>Colour mood</label><div class="chips" id="themePick">${
       Object.entries(THEMES).map(([k, t]) => '<button type="button" class="chip ' + (k === (S.settings.theme || 'blueberry') ? 'on' : '') + '" data-act="theme" data-v="' + k + '">' +
         '<span class="avatar sm" style="background:' + t.accent + ';border-color:' + t.ink + '"></span>' + t.label + '</button>').join('')
-    }</div><div class="hint">Changes right away — no saving needed.</div></div>
+    }</div><div class="hint">Changes right away — no saving needed.${onServer() ? ' Each piggy bank keeps its own look.' : ''}</div></div>
     <div class="divider"></div>
     <div class="card-head"><h2>💱 Currencies</h2><button class="btn soft sm" data-act="fetch-rates">Refresh</button></div>
     <div class="field"><label>Main currency</label><select class="input" id="sBase">${curOptions(baseCur())}</select></div>
@@ -652,25 +663,25 @@ export function settingsModal(): void {
     <div class="rate-row"><input class="input" id="sNewCur" placeholder="THB" maxlength="3" style="grid-column:span 2;text-transform:uppercase">
       <button class="btn soft sm" data-act="add-cur">Add</button></div>
     <div class="hint">${S.settings.ratesUpdatedAt ? 'Rates updated ' + dayLabel2(S.settings.ratesUpdatedAt.slice(0, 10)) : 'Rates are editable estimates — set them to whatever your bank gave you.'}</div>
+    <button class="btn primary wide" style="margin-top:16px" data-act="save-settings">Save settings</button>
     <div class="divider"></div>
-    <div class="card-head"><h2>💾 Your data</h2></div>
+    <div class="card-head"><h2>💾 ${onServer() ? 'This bank’s data' : 'Your data'}</h2></div>
     <div class="row-btns"><button class="btn soft" data-act="export">Export JSON</button>
       <button class="btn soft" data-act="import">Import JSON</button>
       <button class="btn soft" data-act="export-csv">Export CSV</button></div>
     <div class="hint">${onServer()
       ? 'This book lives on the server, so it follows you to any device you sign in on. Import loads a Piggy export straight into it; export gives you the full, portable data model back.'
       : 'Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.'}</div>
-    <div style="margin-top:14px"><button class="btn danger wide" data-act="reset">Erase everything</button></div>
+    <div style="margin-top:14px"><button class="btn danger wide" data-act="reset">Erase everything in it</button></div>
+    <div class="hint">Empties this piggy bank without getting rid of it${onServer() ? ' — deleting it for good is under Your piggy banks' : ''}.</div>
     <input type="file" id="importFile" accept="application/json" style="display:none">
-    ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Account</h2></div>' +
-      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>' +
-      (session.book ? ', in <b>' + esc(session.book.name) + '</b>' : '') + '.</div>' +
-      '<div class="row-btns" style="margin-top:10px">' +
-      '<button class="btn soft" data-act="banks">🏦 Piggy banks</button>' +
-      '<button class="btn soft" data-act="share">👋 Share this one</button>' +
-      '<button class="btn soft" data-act="signout">Sign out</button></div>' : ''}
-    <div class="divider"></div>
-    <button class="btn primary wide" data-act="save-settings">Save settings</button>`);
+    ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Your account</h2></div>' +
+      '<div class="hint">Signed in as <b>' + esc(session.user ? session.user.email : '') + '</b>. ' +
+      'Yours across every piggy bank, not this one\'s.</div>' +
+      '<div class="row-btns" style="margin-top:12px">' +
+      '<button class="btn soft" data-act="banks">🏦 Your piggy banks</button>' +
+      '<button class="btn soft" data-act="signout">Sign out</button></div>' +
+      '<div class="hint">Switching, inviting, leaving and deleting all live there.</div>' : ''}`);
 }
 import { dayLabel as dayLabel2 } from '../lib/utils';
 export function saveSettings(): void {
