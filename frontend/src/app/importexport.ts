@@ -1,6 +1,7 @@
 /** JSON/CSV export, JSON import, and the exchange-rate refresh. */
-import { S, UI, baseCur, person, save, setState, accountLabel, toBase } from './context';
+import { S, UI, baseCur, person, replaceState, save, accountLabel, toBase } from './context';
 import { commit } from './render';
+import { onServer } from './session';
 import { closeModal, settingsModal, toast } from './modals';
 import { itemsInScope } from '../domain/selectors';
 import { settlementsFor } from '../domain/balances';
@@ -46,7 +47,11 @@ export function importJSONFile(file: File): void {
     try {
       const d = JSON.parse(String(fr.result)) as AppState;
       if (!d.schemaVersion || !d.people) throw new Error('not a piggy export');
-      setState(d);
+      /* Contents in, name left alone — on the self-hosted build the name is
+         the shared bank's, and importing into it is not a request to rename it
+         for everyone. On the Pages build the export is a whole-app backup, so
+         its name comes back with it. */
+      replaceState(d, onServer());
       UI.ledgerId = (d.ledgers[0] || {}).id ?? null;
       closeModal(); commit(); toast('Imported');
     } catch {

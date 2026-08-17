@@ -7,6 +7,7 @@
  */
 import { S, setState } from './context';
 import { render } from './render';
+import { syncBookName } from './session';
 import { normalize } from '../model/state';
 import { isIdle, refresh, usingServer } from '../storage/store';
 import type { AppState } from '../model/types';
@@ -31,6 +32,9 @@ let owedRepaint = false;
 export function adoptRemote(state: AppState): void {
   if (JSON.stringify(state) === JSON.stringify(S)) return;
   setState(normalize(state));
+  // Straight setState, not replaceState: the server's name is the truth here —
+  // somebody else may have renamed the bank, and that is news, not a clash.
+  syncBookName(S.meta.appName);
   if (modalOpen()) { owedRepaint = true; return; }
   owedRepaint = false;
   render();

@@ -8,6 +8,7 @@
 import type { AppState, Account, Ledger, Person, Rule } from '../model/types';
 import { blankState } from '../model/state';
 import { store } from '../storage/store';
+import { syncBookName } from './session';
 import { thisMonth } from '../lib/utils';
 import { rateOf as fxRateOf, toBase as fxToBase } from '../domain/fx';
 
@@ -21,6 +22,30 @@ export let S: AppState = blankState();
 export const UI: UIState = { ledgerId: null, month: thisMonth() };
 
 export function setState(next: AppState): void { S = next; }
+
+/**
+ * Swap the whole book out — erasing it, or loading a file into it — without
+ * taking its name along.
+ *
+ * `meta.appName` is not a label this build owns: on the self-hosted build it
+ * *is* the shared piggy bank's name, because the sync endpoint writes it
+ * straight to `Book.name`. So replacing the state renamed the bank for
+ * everybody in it — "Erase everything in it" called it Piggy, and an import
+ * called it whatever the file did — while the button that did it promised to
+ * empty the bank without getting rid of it. A bank is named in exactly two
+ * places, the switcher when it is made and the name box in Settings, and
+ * neither erasing its contents nor loading a file into it is either of those.
+ *
+ * `keepName` is false only for a local import, where the export is a
+ * whole-app backup and the name in it is part of what is being restored —
+ * there is no shared bank there to rename.
+ */
+export function replaceState(next: AppState, keepName: boolean): void {
+  const was = S.meta.appName;
+  S = next;
+  if (keepName && was) S.meta.appName = was;
+  syncBookName(S.meta.appName);
+}
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 export function save(): void {

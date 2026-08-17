@@ -3,7 +3,7 @@ import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Sp
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
-import { myPersonId, onServer, session } from './session';
+import { myPersonId, onServer, session, syncBookName } from './session';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
@@ -698,6 +698,9 @@ export function settingsModal(): void {
 import { dayLabel as dayLabel2 } from '../lib/utils';
 export function saveSettings(): void {
   S.meta.appName = ($('#sName') as HTMLInputElement).value.trim() || 'Piggy';
+  // The name box is one of the two places a bank is named, so the switcher and
+  // the share sheet have to hear about it rather than wait for a fresh list.
+  syncBookName(S.meta.appName);
   const nb = ($('#sBase') as HTMLSelectElement).value;
   if (nb !== S.settings.baseCurrency) {
     const old = S.settings.baseCurrency, f = rateOf(nb);
