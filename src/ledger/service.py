@@ -94,6 +94,16 @@ def member_count(session: Session, book_id: UUID) -> int:
     return len(session.exec(select(BookMember).where(BookMember.book_id == book_id)).all())
 
 
+def owner_count(session: Session, book_id: UUID) -> int:
+    """How many owners a book has — what tells a client whether leaving is on
+    offer. A book keeps at least one, so the last owner's way out is to
+    delete it, and saying so beats a refused request."""
+    rows = session.exec(
+        select(BookMember).where(BookMember.book_id == book_id, BookMember.role == MemberRole.owner)
+    ).all()
+    return len(rows)
+
+
 def get_book_for_user(session: Session, user: User) -> Book | None:
     """The user's default book — the one they joined or made first."""
     membership = session.exec(

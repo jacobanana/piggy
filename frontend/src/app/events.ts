@@ -49,10 +49,12 @@ export function wireEvents(): void {
       case 'banks': void banksModal(); return;
       case 'book-open': void switchTo(id); return;
       case 'book-new': void newBank(); return;
-      case 'book-leave': void leaveBank(); return;
-      case 'book-delete': confirmDeleteBank(); return;
-      case 'book-delete-go': void deleteBank(); return;
-      case 'share': void shareModal(); return;
+      /* Every per-bank action carries the id of the bank it is for: the
+         switcher manages all of them, not only the one that is open. */
+      case 'book-leave': void leaveBank(id || undefined); return;
+      case 'book-delete': confirmDeleteBank(id || undefined); return;
+      case 'book-delete-go': void deleteBank(id || undefined); return;
+      case 'book-share': void shareModal(id || undefined); return;
       case 'invite-new': void makeInvite(); return;
       case 'invite-copy': void copyInvite(id); return;
       case 'invite-revoke': void killInvite(); return;

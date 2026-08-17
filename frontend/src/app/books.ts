@@ -12,12 +12,13 @@ import { gateError, leaveGate, markBusy, paintGate, splash } from './gate';
 import { hydrate } from './hydrate';
 import { closeModal, head, openModal, toast } from './modals';
 import { render } from './render';
-import { isOwner, lastBook, rememberBook, session } from './session';
+import { lastBook, rememberBook, session } from './session';
 import {
   ApiError, acceptInvite, claimPerson, createBook, createInvite, deleteBook, getInvite, inviteUrl,
   listBooks, listMembers, previewInvite, removeMember, revokeInvite,
 } from '../storage/api';
 import type { BookSummary, Invite, InvitePreview, Member } from '../storage/api';
+import type { Person } from '../model/types';
 import { store, useServerBook } from '../storage/store';
 import { blankState } from '../model/state';
 import { $, esc } from '../lib/utils';
@@ -187,35 +188,68 @@ export async function acceptJoin(code: string): Promise<void> {
   }
 }
 
-/* ---------- the switcher ---------- */
+/* ---------- the switcher: one place to manage every bank ---------- */
 
+/**
+ * What the switcher last listed. Every per-bank action carries an id, and
+ * this is how it finds the bank behind it — the one being invited to, left
+ * or deleted is often not the one that happens to be open.
+ */
+let listed: BookSummary[] = [];
+
+function bookById(id: string | undefined): BookSummary | null {
+  if (!id) return session.book;
+  return listed.find((b) => b.id === id) || (session.book?.id === id ? session.book : null);
+}
+
+/** One bank, with everything you can do to it under it. */
+function bankCard(b: BookSummary): string {
+  const here = b.id === session.book?.id;
+  // A book keeps at least one owner, so its only owner has no one to leave it
+  // to; deleting is their way out and offering "leave" would only be refused.
+  const soleOwner = b.role === 'owner' && b.owners === 1;
+  const actions = [
+    b.role === 'owner'
+      ? '<button class="btn soft sm" data-act="book-share" data-id="' + b.id + '">👋 Invite</button>'
+      : '',
+    soleOwner ? '' : '<button class="btn soft sm" data-act="book-leave" data-id="' + b.id + '">🚪 Leave</button>',
+    b.role === 'owner'
+      ? '<button class="btn danger sm" data-act="book-delete" data-id="' + b.id + '">🗑️ Delete</button>'
+      : '',
+  ].join('');
+
+  return '<div style="display:flex;flex-direction:column;gap:8px">' +
+    '<div class="item" data-act="book-open" data-id="' + b.id + '">' +
+    '<div class="emo">' + (here ? '🐷' : b.members > 1 ? '👥' : '🏦') + '</div>' +
+    '<div class="item-main"><div class="name">' + esc(b.name) + '</div>' +
+    '<div class="meta"><span>' + b.members + (b.members === 1 ? ' person' : ' people') + '</span>' +
+    (b.role === 'owner' ? '<span>·</span><span>you own it</span>' : '') + '</div></div>' +
+    '<span class="sub">' + (here ? 'open' : 'switch') + '</span></div>' +
+    '<div class="row-btns" style="padding:0 4px">' + actions + '</div>' +
+    '</div>';
+}
+
+/**
+ * Every piggy bank you are in, and everything you can do to one: open it,
+ * invite somebody, walk out, delete it, start another. All of it here rather
+ * than scattered, because the bank you want rid of is not one you want to
+ * open first — and a way out buried in the sharing sheet is no way out.
+ */
 export async function banksModal(): Promise<void> {
   openModal(head('Your piggy banks') + '<div class="empty">Loading…</div>');
-  let books: BookSummary[];
   try {
-    books = await listBooks();
+    listed = await listBooks();
   } catch (err) {
     closeModal(); toast(message(err)); return;
   }
-  const rows = books.map((b) => {
-    const here = b.id === session.book?.id;
-    return '<div class="item" data-act="book-open" data-id="' + b.id + '">' +
-      '<div class="emo">' + (here ? '🐷' : '🏦') + '</div>' +
-      '<div class="item-main"><div class="name">' + esc(b.name) + '</div>' +
-      '<div class="meta"><span>' + b.members + (b.members === 1 ? ' person' : ' people') + '</span>' +
-      (b.role === 'owner' ? '<span>·</span><span>you own it</span>' : '') + '</div></div>' +
-      '<span class="sub">' + (here ? 'open' : 'switch') + '</span></div>';
-  }).join('');
 
   openModal(head('Your piggy banks') + `
-    <div class="list">${rows}</div>
+    <div class="list" style="gap:16px">${listed.map(bankCard).join('')}</div>
     <div class="divider"></div>
     <div class="field"><label>Start another one</label>
       <input class="input" id="bankName" placeholder="e.g. Lisbon crew" autocomplete="off"></div>
     <button class="btn soft wide" data-act="book-new">＋ New piggy bank</button>
-    <div class="hint">Each piggy bank keeps its own people, lists and currencies. Share one with your flat and another with the friends you travel with.</div>
-    <div class="divider"></div>
-    <button class="btn primary wide" data-act="share">👋 Invite someone to ${esc(session.book?.name || 'this one')}</button>`);
+    <div class="hint">Each piggy bank keeps its own people, lists, currencies and look. Share one with your flat and another with the friends you travel with.</div>`);
 }
 
 export async function switchTo(bookId: string): Promise<void> {
@@ -255,19 +289,32 @@ export async function newBank(): Promise<void> {
   }
 }
 
-/* ---------- sharing the open book ---------- */
+/* ---------- who's in a bank, and the link into it ---------- */
 
-function memberRow(m: Member, people: { id: string; name: string; emoji: string }[]): string {
+/**
+ * The bank the share sheet is showing. Not always the one that's open — the
+ * switcher invites into any of them — so every button on that sheet acts on
+ * this rather than on whatever happens to be on screen behind it.
+ */
+let sharing: BookSummary | null = null;
+
+/**
+ * `people` is empty for a bank that isn't open: its tally hasn't been loaded,
+ * so who a member is inside it is unknowable from here. Claiming a person is
+ * for the open book only, for the same reason.
+ */
+function memberRow(m: Member, people: Person[], here: boolean, canRemove: boolean): string {
   const person = people.find((p) => p.id === m.personId);
-  const who = person ? esc(person.emoji) + ' ' + esc(person.name) : 'not linked to anyone yet';
+  const who = person ? esc(person.emoji) + ' ' + esc(person.name)
+    : here ? 'not linked to anyone yet' : '';
   return '<div class="item">' +
     '<div class="emo">' + (person ? esc(person.emoji) : '👤') + '</div>' +
     '<div class="item-main"><div class="name">' + esc(m.name || m.email) + (m.isMe ? ' <span class="sub">(you)</span>' : '') + '</div>' +
-    '<div class="meta"><span>' + esc(m.email) + '</span><span>·</span><span>' + who + '</span>' +
+    '<div class="meta"><span>' + esc(m.email) + '</span>' + (who ? '<span>·</span><span>' + who + '</span>' : '') +
     (m.role === 'owner' ? '<span class="tag t-joint">owner</span>' : '') + '</div></div>' +
     (m.isMe
-      ? '<button class="btn soft sm" data-act="claim-open">That\'s me…</button>'
-      : isOwner() ? '<button class="btn soft sm" data-act="member-remove" data-id="' + m.userId + '">Remove</button>' : '') +
+      ? (here ? '<button class="btn soft sm" data-act="claim-open">That\'s me…</button>' : '')
+      : canRemove ? '<button class="btn soft sm" data-act="member-remove" data-id="' + m.userId + '">Remove</button>' : '') +
     '</div>';
 }
 
@@ -292,9 +339,16 @@ function inviteBlock(book: BookSummary, invite: Invite | null): string {
     '<div class="hint">Anyone holding this link can join ' + esc(book.name) + ' — and only ' + esc(book.name) + ' — so send it to people you\'d hand your bank statement to. It expires ' + esc(invite.expiresAt.slice(0, 10)) + ', and revoking it shuts the door on anyone who hasn\'t used it yet.</div>';
 }
 
-export async function shareModal(): Promise<void> {
-  const book = session.book;
+/**
+ * Who is in a bank and how to let somebody else in. Only that: opening it,
+ * leaving it and deleting it all live one screen up, in the switcher, so
+ * there is one place that manages banks rather than three.
+ */
+export async function shareModal(bookId?: string): Promise<void> {
+  const book = bookById(bookId);
   if (!book) { toast('No piggy bank open'); return; }
+  sharing = book;
+  const here = book.id === session.book?.id;
   openModal(head('Share ' + esc(book.name)) + '<div class="empty">Loading…</div>');
 
   let members: Member[] = [];
@@ -306,27 +360,20 @@ export async function shareModal(): Promise<void> {
     closeModal(); toast(message(err)); return;
   }
 
-  // The switcher's count came from whenever it last listed; this one is now.
+  // The switcher's counts came from whenever it last listed; these are now.
   book.members = members.length;
-  // A book has to keep an owner, so the only owner cannot leave — deleting is
-  // their way out, and saying so beats a toast from a refused request.
-  const soleOwner = book.role === 'owner' && members.filter((m) => m.role === 'owner').length === 1;
+  book.owners = members.filter((m) => m.role === 'owner').length;
 
   openModal(head('Share ' + esc(book.name)) + `
     <div class="card-head"><h2>👥 Who's in</h2><span class="sub">${members.length}</span></div>
-    <div class="list">${members.map((m) => memberRow(m, S.people)).join('')}</div>
+    <div class="list">${members.map((m) => memberRow(m, here ? S.people : [], here, book.role === 'owner')).join('')}</div>
     ${book.role === 'owner' ? `
       <div class="divider"></div>
       <div class="card-head"><h2>🔗 Invite link for ${esc(book.name)}</h2></div>
       ${inviteBlock(book, invite)}
     ` : '<div class="hint">Only an owner can invite people to this piggy bank.</div>'}
     <div class="divider"></div>
-    ${soleOwner
-      ? '<div class="hint">You\'re the only owner, so there\'s nobody to leave it to. Deleting is the way out.</div>'
-      : '<button class="btn soft wide" data-act="book-leave">Leave this piggy bank</button>'}
-    ${book.role === 'owner'
-      ? '<button class="btn danger wide" style="margin-top:10px" data-act="book-delete">Delete this piggy bank</button>'
-      : ''}`);
+    <button class="btn soft wide" data-act="banks">← Your piggy banks</button>`);
 }
 
 /**
@@ -334,8 +381,8 @@ export async function shareModal(): Promise<void> {
  * rather than a yes tapped — a confirm dialog is one careless tap, and there
  * is nothing on the far side of this to restore from.
  */
-export function confirmDeleteBank(): void {
-  const book = session.book;
+export function confirmDeleteBank(bookId?: string): void {
+  const book = bookById(bookId);
   if (!book) { toast('No piggy bank open'); return; }
   const shared = book.members > 1;
   openModal(head('Delete ' + esc(book.name) + '?') + `
@@ -346,16 +393,16 @@ export function confirmDeleteBank(): void {
     <div class="field"><label>Type the name to confirm</label>
       <input class="input" id="killName" placeholder="${esc(book.name)}"
              autocomplete="off" autocapitalize="off" spellcheck="false"></div>
-    <button class="btn danger wide" data-act="book-delete-go">Delete it for good</button>
+    <button class="btn danger wide" data-act="book-delete-go" data-id="${book.id}">Delete it for good</button>
     <div class="row-btns" style="margin-top:12px">
-      <button class="btn soft wide" data-act="close">Keep it</button>
+      <button class="btn soft wide" data-act="banks">Keep it</button>
     </div>`);
   const el = $('#killName') as HTMLInputElement | null;
   if (el) el.focus();
 }
 
-export async function deleteBank(): Promise<void> {
-  const book = session.book;
+export async function deleteBank(bookId?: string): Promise<void> {
+  const book = bookById(bookId);
   if (!book) return;
   const el = $('#killName') as HTMLInputElement | null;
   const typed = (el ? el.value : '').trim();
@@ -365,24 +412,32 @@ export async function deleteBank(): Promise<void> {
   }
   try {
     await deleteBook(book.id);
-    closeModal();
-    rememberBook(null);
-    session.book = null;
-    setState(blankState());
-    UI.ledgerId = null;
-    toast(book.name + ' is gone');
-    await enterBooks();
   } catch (err) {
-    toast(message(err));
+    toast(message(err)); return;
   }
+  listed = listed.filter((b) => b.id !== book.id);
+  toast(book.name + ' is gone');
+  // Deleting one you weren't in leaves you where you were — back to the list.
+  if (book.id !== session.book?.id) { await banksModal(); return; }
+  closeModal();
+  leftForGood();
+  await enterBooks();
+}
+
+/** Forget the book that was open: it is gone, or we are no longer in it. */
+function leftForGood(): void {
+  rememberBook(null);
+  session.book = null;
+  setState(blankState());
+  UI.ledgerId = null;
 }
 
 export async function makeInvite(): Promise<void> {
-  const book = session.book;
+  const book = sharing;
   if (!book) return;
   try {
     const invite = await createInvite(book.id);
-    await shareModal();
+    await shareModal(book.id);
     await copyInvite(invite.code);
   } catch (err) {
     toast(message(err));
@@ -403,12 +458,12 @@ export async function copyInvite(code: string): Promise<void> {
 }
 
 export async function killInvite(): Promise<void> {
-  const book = session.book;
+  const book = sharing;
   if (!book) return;
   if (!confirm('Revoke the link to ' + book.name + '? Anyone who hasn\'t used it yet will need a new one.')) return;
   try {
     await revokeInvite(book.id);
-    await shareModal();
+    await shareModal(book.id);
     toast('Link revoked');
   } catch (err) {
     toast(message(err));
@@ -416,33 +471,33 @@ export async function killInvite(): Promise<void> {
 }
 
 export async function kickMember(userId: string): Promise<void> {
-  const book = session.book;
+  const book = sharing;
   if (!book) return;
-  if (!confirm('Remove them from this piggy bank? Their entries stay.')) return;
+  if (!confirm('Remove them from ' + book.name + '? Their entries stay.')) return;
   try {
     await removeMember(book.id, userId);
-    await shareModal();
+    await shareModal(book.id);
   } catch (err) {
     toast(message(err));
   }
 }
 
-export async function leaveBank(): Promise<void> {
-  const book = session.book;
+export async function leaveBank(bookId?: string): Promise<void> {
+  const book = bookById(bookId);
   const me = session.user;
   if (!book || !me) return;
   if (!confirm('Leave ' + book.name + '? You will need a new invite to get back in.')) return;
   try {
     await removeMember(book.id, me.id);
-    closeModal();
-    rememberBook(null);
-    session.book = null;
-    setState(blankState());
-    UI.ledgerId = null;
-    await enterBooks();
   } catch (err) {
-    toast(message(err));
+    toast(message(err)); return;
   }
+  listed = listed.filter((b) => b.id !== book.id);
+  // Walking out of one you weren't in leaves the open book alone.
+  if (book.id !== session.book?.id) { await banksModal(); toast('Left ' + book.name); return; }
+  closeModal();
+  leftForGood();
+  await enterBooks();
 }
 
 /* ---------- which person am I ---------- */

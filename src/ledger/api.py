@@ -34,6 +34,7 @@ from ledger.service import (
     invite_by_code,
     member_count,
     membership_in,
+    owner_count,
     read_book,
     remove_member,
     revoke_book_invites,
@@ -53,6 +54,9 @@ class BookSummary(BaseModel):
     name: str
     role: str
     members: int
+    # How many of those members are owners, so the switcher knows whether
+    # leaving is on offer without having to try it and be refused.
+    owners: int = 1
     personId: str | None = None
 
 
@@ -147,6 +151,7 @@ def _summary(session: Session, book: Book, membership: BookMember) -> BookSummar
         name=book.name,
         role=membership.role.value,
         members=member_count(session, book.id),
+        owners=owner_count(session, book.id),
         personId=membership.person_id,
     )
 

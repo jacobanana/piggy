@@ -19,7 +19,6 @@ export interface Session {
 export const session: Session = { mode: 'local', user: null, book: null };
 
 export const onServer = (): boolean => session.mode === 'server';
-export const isOwner = (): boolean => session.book?.role === 'owner';
 /** Which person in the open book is the signed-in user, if they've said. */
 export const myPersonId = (): string | null => session.book?.personId ?? null;
 
