@@ -7,7 +7,10 @@ import {
   saveLedger, saveOccurrence, savePerson, saveRule, saveSettings, saveSettlement, settingsModal,
   settleModal, settlementForm, syncPickedAmount, toast,
 } from './modals';
-import { backToEmail, cancelJoin, doSignOut, sendCode, startJoin, submitCode, submitJoinCode } from './auth';
+import {
+  authEnter, backToEmail, backToSignIn, doSignOut, sendCode, startJoin, startSignUp,
+  submitCode, submitJoinCode, submitSignUp,
+} from './auth';
 import {
   acceptJoin, banksModal, claim, claimModal, copyInvite, killInvite, kickMember,
   leaveBank, makeInvite, maybeAskWhoYouAre, newBank, retryBooks, shareModal, switchTo,
@@ -33,7 +36,9 @@ export function wireEvents(): void {
       case 'auth-back': backToEmail(); return;
       case 'auth-join': startJoin(); return;
       case 'auth-join-go': submitJoinCode(); return;
-      case 'auth-join-cancel': cancelJoin(); return;
+      case 'auth-signin': backToSignIn(); return;
+      case 'auth-signup': startSignUp(); return;
+      case 'auth-signup-go': void submitSignUp(); return;
       case 'auth-retry': case 'books-retry': retryBooks(); return;
       case 'signout': closeModal(); doSignOut(); return;
       case 'banks': void banksModal(); return;
@@ -245,8 +250,9 @@ export function wireEvents(): void {
     if (e.key === 'Escape') { closeModal(); return; }
     if (e.key !== 'Enter') return;
     const id = (e.target as HTMLElement).id;
-    if (id === 'authEmail') { e.preventDefault(); void sendCode(); }
-    if (id === 'authCode') { e.preventDefault(); void submitCode(); }
-    if (id === 'authJoinCode') { e.preventDefault(); submitJoinCode(); }
+    if (id === 'authEmail' || id === 'authName' || id === 'authCode' || id === 'authJoinCode') {
+      e.preventDefault();
+      authEnter(id);
+    }
   });
 }

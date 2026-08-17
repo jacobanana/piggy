@@ -1,5 +1,6 @@
 from sqlmodel import Session, select
 
+from core.config import get_settings
 from identity.models import EmailVerification, User, UserRole
 
 
@@ -98,3 +99,52 @@ def test_deactivated_user_is_refused(client, session):
     session.commit()
     resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {tokens['access_token']}"})
     assert resp.status_code == 403
+
+
+# --------------------------------------------------------------------------
+# Making an account from the home page
+# --------------------------------------------------------------------------
+
+
+def test_signup_makes_an_account_and_signs_it_in(client, session):
+    resp = client.post("/api/auth/signup", json={"email": "new@example.com", "name": "Newcomer"})
+    assert resp.status_code == 202, resp.text
+
+    verification_id, code = latest_code(session, "new@example.com")
+    assert verification_id == resp.json()["verification_id"]
+    tokens = client.post("/api/auth/code/verify", json={"verification_id": verification_id, "code": code})
+    assert tokens.status_code == 200, tokens.text
+    assert tokens.json()["user"]["name"] == "Newcomer"
+
+    # And they land in a piggy bank of their own, not somebody else's.
+    headers = {"Authorization": f"Bearer {tokens.json()['access_token']}"}
+    assert client.get("/api/book", headers=headers).status_code == 200
+    assert len(client.get("/api/books", headers=headers).json()) == 1
+
+
+def test_signup_on_a_taken_address_says_nothing_and_makes_nothing(client, session):
+    """Answering differently here would turn the form into an account oracle."""
+    make_user(session, email="lea@example.com")
+
+    resp = client.post("/api/auth/signup", json={"email": "lea@example.com", "name": "Impostor"})
+    assert resp.status_code == 202
+
+    leas = session.exec(select(User).where(User.email == "lea@example.com")).all()
+    assert len(leas) == 1
+    assert leas[0].name == "Léa"  # the name on the account is not overwritten
+
+
+def test_signup_can_be_switched_off(client, session, monkeypatch):
+    monkeypatch.setenv("OPEN_SIGNUP", "false")
+    get_settings.cache_clear()
+    try:
+        resp = client.post("/api/auth/signup", json={"email": "nosy@example.com", "name": "Nosy"})
+        assert resp.status_code == 403
+        assert session.exec(select(User).where(User.email == "nosy@example.com")).first() is None
+    finally:
+        monkeypatch.delenv("OPEN_SIGNUP")
+        get_settings.cache_clear()
+
+
+def test_health_says_whether_the_door_is_open(client):
+    assert client.get("/api/health").json() == {"status": "ok", "openSignup": True}

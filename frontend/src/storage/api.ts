@@ -136,13 +136,31 @@ export async function detectBackend(): Promise<boolean> {
   try {
     const res = await fetch(url('health'), { signal: ctrl.signal, headers: { Accept: 'application/json' } });
     if (!res.ok) return false;
-    const j = (await res.json()) as { status?: string };
+    const j = (await res.json()) as { status?: string; openSignup?: boolean };
+    signupOpen = j.openSignup === true;
     return j.status === 'ok';
   } catch {
     return false;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* Whether this deployment takes new accounts. Answered by the same probe
+   that found the backend, so the home page never offers a shut door — and
+   stays false on Pages, where there is no backend to ask. */
+let signupOpen = false;
+export const signupIsOpen = (): boolean => signupOpen;
+
+/** Make an account and start the same email round trip signing in uses. */
+export async function signUp(email: string, name: string): Promise<CodeRequested> {
+  const res = await fetch(url('auth/signup'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name }),
+  });
+  const j = await json<{ verification_id: string; expires_at: string }>(res, "Couldn't make that account.");
+  return { verificationId: j.verification_id, expiresAt: j.expires_at };
 }
 
 /** Who the stored token belongs to, or null if it no longer signs anyone in. */

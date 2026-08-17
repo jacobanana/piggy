@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(default=30)
     # Dev-only password-less login endpoints (list users, sign in as one).
     dev_auth_enabled: bool = Field(default=False)
+    # Whether the home page offers "Create an account". Off means the only
+    # ways in are an invite link and `manage create` — set it that way on a
+    # Piggy that is only ever meant to hold your own household.
+    open_signup: bool = Field(default=True)
 
     # --- email (login codes) ------------------------------------------------
     # Both empty -> codes are printed to the server log instead of emailed.

@@ -38,8 +38,10 @@ api.include_router(ledger.api.default_router)
 
 
 @api.get("/health", tags=["meta"])
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, str | bool]:
+    """Also how the frontend learns this deployment takes new accounts, so the
+    home page only offers a door that is actually open."""
+    return {"status": "ok", "openSignup": get_settings().open_signup}
 
 
 app.include_router(api)
