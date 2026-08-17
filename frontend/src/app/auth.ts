@@ -10,20 +10,26 @@ import { enterBooks, pendingJoin, setPendingJoin } from './books';
 import { markBusy, paintGate } from './gate';
 import { toast } from './modals';
 import { session } from './session';
-import { ApiError, claimInvite, requestCode, signOut, verifyCode } from '../storage/api';
+import { ApiError, claimInvite, requestCode, signOut, signUp, signupIsOpen, verifyCode } from '../storage/api';
 import { blankState } from '../model/state';
 import { $, esc } from '../lib/utils';
 
-type Step = 'email' | 'code' | 'join';
+type Step = 'email' | 'code' | 'join' | 'signup';
+/** Which of the three front doors this visitor came through. */
+type Door = 'signin' | 'join' | 'signup';
 
 /**
- * `joinCode` is what makes this two front doors rather than one: empty means
- * signing in to piggy banks you already belong to, set means arriving on
- * somebody's invite — same email round trip, but the account is made if it
- * isn't there yet and the bank the code names is opened at the end.
+ * Three doors, one email round trip. `join` means arriving on somebody's
+ * invite — the account is made if it isn't there yet and the bank the code
+ * names is opened at the end. `signup` means starting from nothing, which
+ * ends in a piggy bank of your own. Neither changes what the 6-digit code
+ * does; they only change what happens on the far side of it, and whether we
+ * can promise a mail is actually coming.
  */
-const A: { step: Step; email: string; joinCode: string; verificationId: string; error: string; busy: boolean } =
-  { step: 'email', email: '', joinCode: '', verificationId: '', error: '', busy: false };
+const A: {
+  step: Step; door: Door; email: string; name: string; joinCode: string;
+  verificationId: string; error: string; busy: boolean;
+} = { step: 'email', door: 'signin', email: '', name: '', joinCode: '', verificationId: '', error: '', busy: false };
 
 const errorLine = (): string =>
   A.error ? '<div class="auth-error">' + esc(A.error) + '</div>' : '';
@@ -33,9 +39,27 @@ export function signInScreen(error?: string): void {
   A.busy = false;
   // A ?join= link lands here first: adopt its code so the visitor gets the
   // joining screens rather than a sign-in that would turn them away.
-  if (!A.joinCode && pendingJoin()) A.joinCode = pendingJoin()!;
+  if (!A.joinCode && pendingJoin()) { A.joinCode = pendingJoin()!; A.door = 'join'; }
 
-  if (A.step === 'join') {
+  if (A.step === 'signup') {
+    paintGate(`
+      <div class="card" style="margin-top:20px">
+        <h2 style="font-size:22px">Start a piggy bank ✨</h2>
+        <p class="sub" style="margin:8px 0 18px;line-height:1.5">No password to pick — tell us where to reach you and we'll send a 6-digit code every time you sign in.</p>
+        <div class="field"><label>Your name</label>
+          <input class="input" id="authName" autocomplete="name" placeholder="Léa" value="${esc(A.name)}"></div>
+        <div class="field"><label>Email</label>
+          <input class="input" id="authEmail" type="email" inputmode="email" autocomplete="email"
+                 placeholder="you@example.com" value="${esc(A.email)}"></div>
+        <button class="btn primary wide" data-act="auth-signup-go">Create my account</button>
+        ${errorLine()}
+        <div class="row-btns" style="margin-top:12px">
+          <button class="btn soft wide" data-act="auth-signin">I already have one</button>
+        </div>
+      </div>`);
+    const el = $('#authName') as HTMLInputElement | null;
+    if (el) el.focus();
+  } else if (A.step === 'join') {
     paintGate(`
       <div class="card" style="margin-top:20px">
         <h2 style="font-size:22px">Join a piggy bank 🐷</h2>
@@ -47,7 +71,7 @@ export function signInScreen(error?: string): void {
         <button class="btn primary wide" data-act="auth-join-go">Continue</button>
         ${errorLine()}
         <div class="row-btns" style="margin-top:12px">
-          <button class="btn soft wide" data-act="auth-join-cancel">I'll sign in instead</button>
+          <button class="btn soft wide" data-act="auth-signin">I'll sign in instead</button>
         </div>
       </div>`);
     const el = $('#authJoinCode') as HTMLInputElement | null;
@@ -64,7 +88,7 @@ export function signInScreen(error?: string): void {
         ${errorLine()}
         <div class="row-btns" style="margin-top:12px">
           <button class="btn soft" data-act="auth-join">Another code</button>
-          <button class="btn soft" data-act="auth-join-cancel">Sign in instead</button>
+          <button class="btn soft" data-act="auth-signin">Sign in instead</button>
         </div>
       </div>`);
     const el = $('#authEmail') as HTMLInputElement | null;
@@ -81,7 +105,12 @@ export function signInScreen(error?: string): void {
         ${errorLine()}
         <div class="divider"></div>
         <button class="btn soft wide" data-act="auth-join">🔗 I've got an invite code</button>
-        <div class="hint">Somebody shared a piggy bank with you? Their code gets you in, even if you've never been here before.</div>
+        ${signupIsOpen()
+          ? '<button class="btn soft wide" style="margin-top:8px" data-act="auth-signup">✨ Create an account</button>'
+          : ''}
+        <div class="hint">${signupIsOpen()
+          ? 'Somebody shared a piggy bank with you? Their code gets you in. Nobody has? Start one of your own.'
+          : 'Somebody shared a piggy bank with you? Their code gets you in, even if you\'ve never been here before.'}</div>
       </div>`);
     const el = $('#authEmail') as HTMLInputElement | null;
     if (el && !A.email) el.focus();
@@ -90,9 +119,9 @@ export function signInScreen(error?: string): void {
       <div class="card" style="margin-top:20px">
         <h2 style="font-size:22px">Check your email 📬</h2>
         <p class="sub" style="margin:8px 0 18px;line-height:1.5">${
-          A.joinCode
-            ? 'A 6-digit code is on its way to <b>' + esc(A.email) + '</b>. It\'s good for 15 minutes.'
-            : 'If <b>' + esc(A.email) + '</b> has an account, a 6-digit code is on its way. It\'s good for 15 minutes.'
+          A.door === 'signin'
+            ? 'If <b>' + esc(A.email) + '</b> has an account, a 6-digit code is on its way. It\'s good for 15 minutes.'
+            : 'A 6-digit code is on its way to <b>' + esc(A.email) + '</b>. It\'s good for 15 minutes.'
         }</p>
         <div class="field"><label>Sign-in code</label>
           <input class="input mono" id="authCode" inputmode="numeric" autocomplete="one-time-code"
@@ -122,7 +151,7 @@ export async function sendCode(): Promise<void> {
   try {
     // Joining says the code out loud, so the server can vouch for a brand-new
     // address; signing in never does, so an unknown one stays unanswerable.
-    const { verificationId } = A.joinCode ? await claimInvite(A.joinCode, email) : await requestCode(email);
+    const { verificationId } = A.door === 'join' ? await claimInvite(A.joinCode, email) : await requestCode(email);
     A.verificationId = verificationId;
     A.step = 'code';
     signInScreen();
@@ -148,24 +177,57 @@ export async function submitCode(): Promise<void> {
 }
 
 export function backToEmail(): void {
-  A.step = 'email';
+  A.step = A.door === 'signup' ? 'signup' : 'email';
   A.verificationId = '';
   signInScreen();
+}
+
+/** Starting from nothing: name, email, then a piggy bank of your own. */
+export function startSignUp(): void {
+  A.joinCode = '';
+  setPendingJoin(null);
+  A.door = 'signup';
+  A.step = 'signup';
+  A.verificationId = '';
+  signInScreen();
+}
+
+export async function submitSignUp(): Promise<void> {
+  if (A.busy) return;
+  const nameEl = $('#authName') as HTMLInputElement | null;
+  const emailEl = $('#authEmail') as HTMLInputElement | null;
+  A.name = (nameEl ? nameEl.value : A.name).trim();
+  const email = (emailEl ? emailEl.value : A.email).trim();
+  A.email = email;
+  if (!A.name) { signInScreen('What should we call you?'); return; }
+  if (!email || !email.includes('@')) { signInScreen('That does not look like an email address.'); return; }
+  A.busy = true;
+  markBusy('Creating…');
+  try {
+    const { verificationId } = await signUp(email, A.name);
+    A.verificationId = verificationId;
+    A.step = 'code';
+    signInScreen();
+  } catch (err) {
+    signInScreen(err instanceof ApiError ? err.message : "Couldn't reach the server — try again in a moment.");
+  }
 }
 
 /** "I've got an invite code" — and the way back to it from the email step. */
 export function startJoin(): void {
   const el = $('#authJoinCode') as HTMLInputElement | null;
   if (el) A.joinCode = el.value.trim().toUpperCase();
+  A.door = 'join';
   A.step = 'join';
   A.verificationId = '';
   signInScreen();
 }
 
-/** Drop the code and go back to signing in as somebody who already belongs. */
-export function cancelJoin(): void {
+/** Back to the plain sign-in door, dropping any code or half-typed account. */
+export function backToSignIn(): void {
   A.joinCode = '';
   setPendingJoin(null);
+  A.door = 'signin';
   A.step = 'email';
   A.verificationId = '';
   signInScreen();
@@ -183,6 +245,14 @@ export function submitJoinCode(): void {
   signInScreen();
 }
 
+/** Enter on a gate field does whatever that screen's primary button does. */
+export function authEnter(fieldId: string): void {
+  if (fieldId === 'authCode') { void submitCode(); return; }
+  if (fieldId === 'authJoinCode') { submitJoinCode(); return; }
+  if (A.step === 'signup') { void submitSignUp(); return; }
+  void sendCode();
+}
+
 export function doSignOut(): void {
   signOut();
   session.user = null;
@@ -191,6 +261,7 @@ export function doSignOut(): void {
   // key: signing out and back in used to drop you into the oldest book you
   // belong to, which for anyone who joined a shared one is the wrong bank.
   A.step = 'email';
+  A.door = 'signin';
   A.joinCode = '';
   A.verificationId = '';
   setState(blankState());
@@ -204,6 +275,7 @@ export function sessionExpired(): void {
   session.user = null;
   session.book = null;
   A.step = 'email';
+  A.door = 'signin';
   A.joinCode = '';
   setState(blankState());
   signInScreen('That session has expired — sign in again.');

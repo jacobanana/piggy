@@ -37,6 +37,11 @@ class LoginCodeVerifyRequest(BaseModel):
     code: str
 
 
+class SignUpRequest(BaseModel):
+    email: EmailStr
+    name: str | None = None
+
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
@@ -77,6 +82,28 @@ def request_login_code(
     service: Annotated[LoginCodeService, Depends(get_login_code_service)],
 ) -> LoginCodeRequested:
     verification = service.request(body.email)
+    return LoginCodeRequested(verification_id=verification.id, expires_at=verification.expires_at)
+
+
+@router.post("/signup", response_model=LoginCodeRequested, status_code=status.HTTP_202_ACCEPTED)
+def sign_up(
+    body: SignUpRequest,
+    service: Annotated[LoginCodeService, Depends(get_login_code_service)],
+    session: Annotated[Session, Depends(get_session)],
+) -> LoginCodeRequested:
+    """Make an account and send it its first sign-in code.
+
+    An address that already has an account gets the same 202 and the same
+    email as anybody signing in — saying "that one's taken" here would turn
+    the form into a way of asking who has an account.
+    """
+    if not get_settings().open_signup:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="This Piggy isn't taking new accounts. Ask whoever runs it for an invite link.",
+        )
+    user = UserService(session).ensure_user(body.email, body.name)
+    verification = service.request(user.email)
     return LoginCodeRequested(verification_id=verification.id, expires_at=verification.expires_at)
 
 
