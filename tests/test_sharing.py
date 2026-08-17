@@ -3,6 +3,17 @@
 from sqlmodel import select
 
 from identity.models import User
+from ledger.models import (
+    Account,
+    Book,
+    BookInvite,
+    BookMember,
+    BookSnapshot,
+    Expense,
+    Ledger,
+    Person,
+    Split,
+)
 from tests.test_auth import latest_code, make_user, sign_in
 
 
@@ -268,6 +279,69 @@ def test_the_last_owner_cannot_be_removed(client, session):
     me = client.get(f"/api/books/{book_id}/members", headers=lea).json()[0]
 
     assert client.delete(f"/api/books/{book_id}/members/{me['userId']}", headers=lea).status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Deleting a piggy bank
+# --------------------------------------------------------------------------
+
+
+def test_an_owner_can_delete_a_book_and_nothing_of_it_is_left(client, session):
+    """The only owner's way out — leaving is refused, so this has to work."""
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea", "Marc")
+    read = client.get(f"/api/books/{book_id}", headers=lea)
+    state = read.json()
+    state["expenses"] = [expense("e1", "Groceries")]
+    client.put(f"/api/books/{book_id}", json=state, headers={**lea, "If-Match": read.headers["ETag"]})
+    client.post(f"/api/books/{book_id}/invite", headers=lea)
+
+    assert client.delete(f"/api/books/{book_id}", headers=lea).status_code == 204
+
+    assert client.get(f"/api/books/{book_id}", headers=lea).status_code == 404
+    assert client.get("/api/books", headers=lea).json() == []
+    for model in (Book, BookInvite, BookMember, BookSnapshot, Person, Account, Ledger, Expense, Split):
+        assert session.exec(select(model)).all() == [], f"{model.__name__} rows outlived the book"
+
+
+def test_deleting_takes_the_book_away_from_everyone_in_it(client, session):
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea", "Marc")
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
+    marc = auth(client, session, "marc@example.com")
+    client.post(f"/api/invites/{code}/accept", headers=marc)
+
+    assert client.delete(f"/api/books/{book_id}", headers=lea).status_code == 204
+
+    assert client.get("/api/books", headers=marc).json() == []
+    assert client.get(f"/api/books/{book_id}", headers=marc).status_code == 404
+    # The link it was shared with dies with it rather than 500ing on a ghost.
+    assert client.get(f"/api/invites/{code}", headers=marc).status_code == 404
+
+
+def test_only_an_owner_can_delete_a_book(client, session):
+    lea = auth(client, session, "lea@example.com")
+    book_id, _ = book_with(client, lea, "Lea")
+    code = client.post(f"/api/books/{book_id}/invite", headers=lea).json()["code"]
+    marc = auth(client, session, "marc@example.com")
+    client.post(f"/api/invites/{code}/accept", headers=marc)
+
+    assert client.delete(f"/api/books/{book_id}", headers=marc).status_code == 403
+    # And somebody with no business here learns nothing either way.
+    nosy = auth(client, session, "nosy@example.com")
+    assert client.delete(f"/api/books/{book_id}", headers=nosy).status_code == 404
+    assert client.get(f"/api/books/{book_id}", headers=lea).status_code == 200
+
+
+def test_deleting_one_book_leaves_the_others_standing(client, session):
+    lea = auth(client, session, "lea@example.com")
+    flat, _ = book_with(client, lea, "Lea", "Marc")
+    trip = client.post("/api/books", json={"name": "Lisbon"}, headers=lea).json()["id"]
+
+    assert client.delete(f"/api/books/{flat}", headers=lea).status_code == 204
+
+    assert [b["id"] for b in client.get("/api/books", headers=lea).json()] == [trip]
+    assert client.get(f"/api/books/{trip}", headers=lea).status_code == 200
 
 
 # --------------------------------------------------------------------------

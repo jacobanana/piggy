@@ -638,7 +638,7 @@ export function settingsModal(): void {
       '<div class="item-main"><div class="name">' + esc(a.name) + '</div><div class="meta">' +
       (a.kind === 'joint' ? 'joint · ' : 'personal · ') + Object.entries(a.ownership).map(([pid, sh]) => (person(pid)?.name || '?') + ' ' + Math.round(sh * 100) + '%').join(' / ') +
       '</div></div><span class="sub">edit</span></div>').join('')}</div>
-    <div class="hint">Money paid from an account is credited to its owners. A 50/50 joint account means joint spending needs no settling.</div>
+    <div class="hint">Everyone starts with their own money to pay from. Share a card or a joint account? Add it with ＋ Add — money paid from an account is credited to its owners, so a 50/50 shared one means shared spending needs no settling.</div>
     <div class="field"><label>Colour mood</label><div class="chips" id="themePick">${
       Object.entries(THEMES).map(([k, t]) => '<button type="button" class="chip ' + (k === (S.settings.theme || 'blueberry') ? 'on' : '') + '" data-act="theme" data-v="' + k + '">' +
         '<span class="avatar sm" style="background:' + t.accent + ';border-color:' + t.ink + '"></span>' + t.label + '</button>').join('')
@@ -796,7 +796,10 @@ export function onboard(): void {
     S.people.push(p);
     S.accounts.push({ id: uid('acc_'), name: name + "'s money", kind: 'personal', ownership: { [p.id]: 1 } });
   });
-  S.accounts.push({ id: uid('acc_'), name: 'Joint account', kind: 'joint', ownership: evenOwnership() });
+  /* Everyone gets their own money to pay from, and nothing else. A shared
+     account used to be invented here, which put a "Joint account" nobody
+     holds in every picker and quietly credited two people for money one of
+     them paid. Settings › Accounts adds a real one in a few taps. */
   const home: Ledger = {
     id: uid('led_'), name: 'Home', emoji: '🏠', kind: 'household',
     currency: S.settings.baseCurrency, archived: false, createdAt: new Date().toISOString(),

@@ -249,6 +249,12 @@ export const createBook = async (name: string): Promise<BookSummary> =>
     "Couldn't create that piggy bank.",
   );
 
+/** Erase a piggy bank and everything in it, for everyone in it. Owners only. */
+export async function deleteBook(bookId: string): Promise<void> {
+  const res = await authed(`books/${bookId}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(res.status, await detailOf(res, "Couldn't delete that piggy bank."));
+}
+
 /* ---------- members ---------- */
 
 export interface Member {

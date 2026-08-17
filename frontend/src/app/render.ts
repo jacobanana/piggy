@@ -76,7 +76,7 @@ export function renderOnboarding(): void {
       <select class="input" id="obCur">${['CHF', 'EUR', 'USD', 'GBP'].map((c) => '<option ' + (c === 'CHF' ? 'selected' : '') + '>' + c + '</option>').join('')}</select>
     </div>
     <button class="btn primary wide" data-act="ob-go">Start our piggy bank 🐷</button>
-    <div class="hint">You can add or remove people later under Settings.</div>
+    <div class="hint">Everyone gets their own money to pay from. Share an account too? Add it under Settings, along with anyone we've missed.</div>
   </div>`;
 }
 

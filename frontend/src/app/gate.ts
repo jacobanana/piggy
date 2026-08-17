@@ -11,10 +11,28 @@ import { $, esc } from '../lib/utils';
 
 export function paintGate(html: string): void {
   document.body.classList.add('gate');
+  resetBrand();
   const bar = $('#ledgerBar'); if (bar) bar.innerHTML = '';
   const fab = $('#fab'); if (fab) fab.style.display = 'none';
   const main = $('#main');
   if (main) main.innerHTML = html;
+}
+
+/**
+ * Nothing is open behind a gate, so the header must not still name the book
+ * that was — the one just left or deleted especially — nor stay tappable,
+ * which would open the switcher on top of a screen with no book under it.
+ * render() puts all of it back the moment one is open.
+ */
+function resetBrand(): void {
+  const name = $('#brandName');
+  if (name) name.textContent = 'Piggy';
+  const box = $('.brand');
+  if (!box) return;
+  box.classList.remove('tappable');
+  delete box.dataset.act;
+  const caret = box.querySelector('.caret');
+  if (caret) caret.remove();
 }
 
 export function leaveGate(): void {
