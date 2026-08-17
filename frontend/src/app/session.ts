@@ -19,6 +19,17 @@ export interface Session {
 export const session: Session = { mode: 'local', user: null, book: null };
 
 export const onServer = (): boolean => session.mode === 'server';
+
+/**
+ * The open book's name is held twice: `session.book.name`, which the switcher
+ * and the share sheet read, and `meta.appName` in the state, which is the same
+ * field on the wire — the sync endpoint writes it straight to `Book.name`.
+ * Whenever one moves the other has to follow, or the share sheet keeps
+ * offering an invite to a bank under a name nobody sees any more.
+ */
+export function syncBookName(appName: string): void {
+  if (session.book && appName) session.book.name = appName;
+}
 /** Which person in the open book is the signed-in user, if they've said. */
 export const myPersonId = (): string | null => session.book?.personId ?? null;
 

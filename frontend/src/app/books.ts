@@ -202,7 +202,12 @@ function bookById(id: string | undefined): BookSummary | null {
   return listed.find((b) => b.id === id) || (session.book?.id === id ? session.book : null);
 }
 
-/** One bank, with everything you can do to it under it. */
+/**
+ * One bank as a single object: the row you tap to open it, and a strip of its
+ * own actions sharing its border. They were loose buttons in a gap under the
+ * row before — which read as belonging to nothing in particular, and cost a
+ * card's height each on a phone.
+ */
 function bankCard(b: BookSummary): string {
   const here = b.id === session.book?.id;
   // A book keeps at least one owner, so its only owner has no one to leave it
@@ -210,22 +215,22 @@ function bankCard(b: BookSummary): string {
   const soleOwner = b.role === 'owner' && b.owners === 1;
   const actions = [
     b.role === 'owner'
-      ? '<button class="btn soft sm" data-act="book-share" data-id="' + b.id + '">👋 Invite</button>'
+      ? '<button data-act="book-share" data-id="' + b.id + '">👋 Invite</button>'
       : '',
-    soleOwner ? '' : '<button class="btn soft sm" data-act="book-leave" data-id="' + b.id + '">🚪 Leave</button>',
+    soleOwner ? '' : '<button data-act="book-leave" data-id="' + b.id + '">🚪 Leave</button>',
     b.role === 'owner'
-      ? '<button class="btn danger sm" data-act="book-delete" data-id="' + b.id + '">🗑️ Delete</button>'
+      ? '<button class="warn" data-act="book-delete" data-id="' + b.id + '">🗑️ Delete</button>'
       : '',
   ].join('');
 
-  return '<div style="display:flex;flex-direction:column;gap:8px">' +
+  return '<div class="itemcard' + (here ? ' on' : '') + '">' +
     '<div class="item" data-act="book-open" data-id="' + b.id + '">' +
     '<div class="emo">' + (here ? '🐷' : b.members > 1 ? '👥' : '🏦') + '</div>' +
     '<div class="item-main"><div class="name">' + esc(b.name) + '</div>' +
     '<div class="meta"><span>' + b.members + (b.members === 1 ? ' person' : ' people') + '</span>' +
     (b.role === 'owner' ? '<span>·</span><span>you own it</span>' : '') + '</div></div>' +
     '<span class="sub">' + (here ? 'open' : 'switch') + '</span></div>' +
-    '<div class="row-btns" style="padding:0 4px">' + actions + '</div>' +
+    (actions ? '<div class="itembar">' + actions + '</div>' : '') +
     '</div>';
 }
 
@@ -244,12 +249,14 @@ export async function banksModal(): Promise<void> {
   }
 
   openModal(head('Your piggy banks') + `
-    <div class="list" style="gap:16px">${listed.map(bankCard).join('')}</div>
+    <div class="list">${listed.map(bankCard).join('')}</div>
     <div class="divider"></div>
     <div class="field"><label>Start another one</label>
-      <input class="input" id="bankName" placeholder="e.g. Lisbon crew" autocomplete="off"></div>
-    <button class="btn soft wide" data-act="book-new">＋ New piggy bank</button>
-    <div class="hint">Each piggy bank keeps its own people, lists, currencies and look. Share one with your flat and another with the friends you travel with.</div>`);
+      <div class="addrow">
+        <input class="input" id="bankName" placeholder="e.g. Lisbon crew" autocomplete="off">
+        <button class="btn soft" data-act="book-new">＋ New</button>
+      </div></div>
+    <div class="hint">Each one keeps its own people, lists, currencies and look — the flat in one, the friends you travel with in another.</div>`);
 }
 
 export async function switchTo(bookId: string): Promise<void> {
@@ -329,14 +336,16 @@ function inviteBlock(book: BookSummary, invite: Invite | null): string {
       '<button class="btn primary wide" style="margin-top:10px" data-act="invite-new">Make an invite link</button>' +
       '<div class="hint">One link per piggy bank. It opens ' + esc(book.name) + ' and nothing else you keep here.</div>';
   }
-  return '<div class="field"><label>Send this</label>' +
-    '<input class="input mono" id="inviteUrl" readonly value="' + esc(inviteUrl(invite.code)) + '"></div>' +
+  // The link and its Copy on one line, the code and its Revoke on the next:
+  // four stacked blocks and a wide button used to push the hint off a phone.
+  return '<div class="field"><label>Send this link</label>' +
+    '<div class="addrow"><input class="input mono" id="inviteUrl" readonly value="' + esc(inviteUrl(invite.code)) + '">' +
+    '<button class="btn primary" data-act="invite-copy" data-id="' + esc(invite.code) + '">Copy</button></div></div>' +
     '<div class="field"><label>Or read out the code</label>' +
-    '<div class="mono" style="font-size:26px;letter-spacing:4px;text-align:center">' + esc(invite.code) + '</div></div>' +
-    '<button class="btn primary wide" data-act="invite-copy" data-id="' + esc(invite.code) + '">Copy link</button>' +
-    '<div class="row-btns" style="margin-top:12px">' +
-    '<button class="btn soft wide" data-act="invite-revoke">Revoke this link</button></div>' +
-    '<div class="hint">Anyone holding this link can join ' + esc(book.name) + ' — and only ' + esc(book.name) + ' — so send it to people you\'d hand your bank statement to. It expires ' + esc(invite.expiresAt.slice(0, 10)) + ', and revoking it shuts the door on anyone who hasn\'t used it yet.</div>';
+    '<div class="addrow">' +
+    '<div class="input mono" style="font-size:22px;letter-spacing:4px;text-align:center">' + esc(invite.code) + '</div>' +
+    '<button class="btn soft" data-act="invite-revoke">Revoke</button></div></div>' +
+    '<div class="hint">Anyone holding this link can join ' + esc(book.name) + ' — and only ' + esc(book.name) + '. It expires ' + esc(invite.expiresAt.slice(0, 10)) + ', and revoking shuts the door on anyone who hasn\'t used it yet.</div>';
 }
 
 /**

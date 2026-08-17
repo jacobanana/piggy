@@ -201,14 +201,19 @@ export function itemRow(it: LedgerItem, opts?: { markPaid?: boolean }): string {
   if (acc && acc.kind === 'joint') tags.push('<span class="tag t-joint">joint</span>');
   const split = it.split || { mode: 'equal', participants: [], values: {} };
   const parts = split.participants && split.participants.length ? split.participants : S.people.map((p) => p.id);
-  const splitTxt = parts.length === S.people.length && (split.mode || 'equal') === 'equal' ? 'split evenly'
+  const evenly = parts.length === S.people.length && (split.mode || 'equal') === 'equal';
+  /* Nothing is said about an even split across everyone: it is what almost
+     every row is, and saying it wrapped the meta line onto a line of its own
+     on a phone — four lines of chrome under a two-word name. The unusual
+     splits are the ones worth the space. */
+  const splitTxt = evenly ? ''
     : split.mode === 'exact' ? 'custom amounts' : split.mode === 'shares' ? 'by shares'
     : 'for ' + parts.map((id) => person(id)?.name).filter(Boolean).join(' & ');
   return '<div class="item ' + (skipped ? 'skip' : '') + '" data-act="open" data-kind="' + it.kind + '" data-id="' + it.id + '">' +
     '<div class="emo">' + esc(it.emoji || '📦') + '</div>' +
     '<div class="item-main"><div class="name">' + esc(it.name) + '</div>' +
     '<div class="meta">' + (acc ? '<span>' + accountEmoji(it.accountId) + ' ' + esc(accountLabel(it.accountId)) + '</span>' : '') +
-    '<span>·</span><span>' + esc(splitTxt) + '</span>' + tags.join('') + '</div></div>' +
+    (splitTxt ? (acc ? '<span>·</span>' : '') + '<span>' + esc(splitTxt) + '</span>' : '') + tags.join('') + '</div></div>' +
     '<div class="amount">' + (skipped ? '—' : money(base, baseCur())) +
     (foreign ? '<small>' + money(it.amount, it.currency) + '</small>' : '') + '</div>' +
     (opts && opts.markPaid ? '<button class="btn mint sm" data-act="mark-paid" data-id="' + it.id + '">Paid</button>' : '') +

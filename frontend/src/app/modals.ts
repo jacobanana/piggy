@@ -3,7 +3,7 @@ import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Sp
 import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
-import { myPersonId, onServer, session } from './session';
+import { myPersonId, onServer, session, syncBookName } from './session';
 import { repaintIfOwed } from './sync';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
@@ -349,15 +349,27 @@ export function rulesModal(): void {
 export function settleModal(): void {
   const l = activeLedger()!;
   const debts = simplifyDebts(computeBalances(S, l.id));
-  const body = debts.length ? debts.map((d) => {
+  /* One debt per card, with its two answers welded to the bottom of it — the
+     same shape the switcher uses for a piggy bank. They were four things loose
+     in a dashed box before, and on a phone the buttons wrapped onto their own
+     line and stopped looking like this pair's buttons at all. */
+  const body = debts.length ? '<div class="list">' + debts.map((d) => {
     const a = person(d.from), b = person(d.to);
-    return '<div class="debt" style="flex-wrap:wrap">' + avatar(a, 'lg') + '<span class="arrow">→</span>' + avatar(b, 'lg') +
-      '<span class="amt">' + money2(fromCents(d.cents), baseCur()) + '</span>' +
-      '<button class="btn mint sm" data-act="do-settle" data-from="' + d.from + '" data-to="' + d.to + '" data-c="' + d.cents + '">Paid in full</button>' +
-      '<button class="btn soft sm" data-act="new-settle" data-from="' + d.from + '" data-to="' + d.to + '" data-c="' + d.cents + '">Part of it…</button></div>';
-  }).join('') : '<div class="empty"><span class="big">🎉</span>Nothing to settle.</div>';
+    const who = 'data-from="' + d.from + '" data-to="' + d.to + '" data-c="' + d.cents + '"';
+    return '<div class="itemcard">' +
+      '<div class="item" style="cursor:default">' +
+      '<span class="stack pair">' + avatar(a, 'lg') + avatar(b, 'lg') + '</span>' +
+      '<div class="item-main"><div class="name">' + esc(a?.name || '?') + ' → ' + esc(b?.name || '?') + '</div>' +
+      // who owes whom is the arrow in the name line, so the meta only dates it
+      '<div class="meta"><span>everything so far</span></div></div>' +
+      '<div class="amount">' + money2(fromCents(d.cents), baseCur()) + '</div></div>' +
+      '<div class="itembar">' +
+      '<button class="go" ' + who + ' data-act="do-settle">✓ Paid in full</button>' +
+      '<button ' + who + ' data-act="new-settle">Part of it…</button>' +
+      '</div></div>';
+  }).join('') + '</div>' : '<div class="empty"><span class="big">🎉</span>Nothing to settle.</div>';
   openModal(head('Settle up') +
-    '<div class="sub" style="margin:-8px 0 14px">Tap Paid in full once the money has actually moved — it is logged on today\'s date and comes straight off the running tally. Part of it… lets you log a smaller amount.</div>' +
+    '<div class="sub" style="margin:-8px 0 12px">Paid in full once the money has actually moved — logged today, straight off the tally. Part of it… logs a smaller amount.</div>' +
     (debts.length ? '<div class="field"><label>How it travelled</label>' + payMethodChips(lastPayMethod()) + '</div>' : '') +
     body +
     '<div class="divider"></div>' +
@@ -686,6 +698,9 @@ export function settingsModal(): void {
 import { dayLabel as dayLabel2 } from '../lib/utils';
 export function saveSettings(): void {
   S.meta.appName = ($('#sName') as HTMLInputElement).value.trim() || 'Piggy';
+  // The name box is one of the two places a bank is named, so the switcher and
+  // the share sheet have to hear about it rather than wait for a fresh list.
+  syncBookName(S.meta.appName);
   const nb = ($('#sBase') as HTMLSelectElement).value;
   if (nb !== S.settings.baseCurrency) {
     const old = S.settings.baseCurrency, f = rateOf(nb);

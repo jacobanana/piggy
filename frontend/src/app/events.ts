@@ -19,7 +19,7 @@ import {
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { applyTheme } from './theme';
 import { blankState } from '../model/state';
-import { setState } from './context';
+import { replaceState } from './context';
 import { addMonths, fromCents, monthOf, thisMonth, todayISO, $ } from '../lib/utils';
 import { DEFAULT_RATES } from '../lib/constants';
 
@@ -224,7 +224,9 @@ export function wireEvents(): void {
       case 'import': ($('#importFile') as HTMLInputElement).click(); return;
       case 'reset':
         if (confirm('Erase everything and start over?')) {
-          setState(blankState());
+          // Its contents, not its name: on a shared bank the name belongs to
+          // everyone in it, and this button only offered to empty the bank.
+          replaceState(blankState(), true);
           UI.ledgerId = null; UI.month = thisMonth();
           closeModal(); commit();
         }
