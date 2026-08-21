@@ -126,6 +126,9 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .debt .amt{margin-left:auto;font-family:var(--mono);font-weight:700;font-size:16px}
 .arrow{font-size:18px;color:var(--ink-soft)}
 .stamp{margin:14px auto 2px;width:max-content;transform:rotate(-7deg);border:3px double var(--mint);color:var(--mint);border-radius:10px;padding:6px 16px;font-family:var(--display);font-weight:700;letter-spacing:2px;font-size:15px;opacity:.9}
+.figure{font-family:var(--mono);font-weight:700;font-size:32px;line-height:1.05;text-align:center;letter-spacing:-.5px}
+.figure-cap{text-align:center;color:var(--ink-soft);font-size:13px;font-weight:600;margin-top:5px}
+.figure-cap b{color:var(--ink)}
 
 /* ---------- people ---------- */
 .avatar{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;border:2px solid var(--ink);flex:none;background:#eee}

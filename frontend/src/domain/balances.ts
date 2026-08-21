@@ -12,7 +12,7 @@ import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types'
 import { itemsInScope } from './selectors';
 import { splitCents } from './splits';
 import { toBase } from './fx';
-import { cents } from '../lib/utils';
+import { cents, monthIndex, monthOf } from '../lib/utils';
 
 /**
  * What one item alone does to each person's balance, in base-currency cents.
@@ -142,4 +142,45 @@ export function categoryTotals(s: AppState, ledgerId: string, monthKey: MonthKey
     map[k] = (map[k] || 0) + cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
   });
   return Object.entries(map).sort((a, b) => b[1] - a[1]);
+}
+
+/**
+ * What one person's ledger adds up to — the figures that stand in for the
+ * tally on a book with nobody to owe. All base-currency cents, planned
+ * entries kept out of everything except `planned` itself.
+ */
+export interface SpendSummary {
+  /** Everything actually paid, first entry to last. */
+  total: number;
+  /** Paid inside `monthKey`, or 0 when the scope has no month (a trip). */
+  month: number;
+  /** How many entries make up `total`. */
+  count: number;
+  /** Calendar months from the first entry to the last, inclusive. Never 0. */
+  span: number;
+  /** `total` spread evenly over `span` — what a typical month costs. */
+  perMonth: number;
+  /** The month the first entry landed in, or null when there are none. */
+  since: MonthKey | null;
+  /** Booked but not paid yet, whole ledger — the only planned figure here. */
+  planned: number;
+}
+
+export function spendSummary(s: AppState, ledgerId: string, monthKey: MonthKey | null): SpendSummary {
+  const base = (it: { amount: number; currency: string; fxRate: number | null }): number =>
+    cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
+  const all = itemsInScope(s, ledgerId, null);
+  const total = all.reduce((sum, it) => sum + base(it), 0);
+  const months = all.map((it) => monthOf(it.date)).sort();
+  const since = months.length ? months[0] : null;
+  /* The span runs to the last entry, not to today: a ledger that stopped in
+     March shouldn't have its typical month diluted by every quiet month since. */
+  const span = months.length ? monthIndex(months[months.length - 1]) - monthIndex(months[0]) + 1 : 1;
+  const month = monthKey
+    ? itemsInScope(s, ledgerId, monthKey).reduce((sum, it) => sum + base(it), 0)
+    : 0;
+  const planned = s.expenses
+    .filter((e) => e.ledgerId === ledgerId && e.planned)
+    .reduce((sum, e) => sum + base(e), 0);
+  return { total, month, count: all.length, span, perMonth: Math.round(total / span), since, planned };
 }
