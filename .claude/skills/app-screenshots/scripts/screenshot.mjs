@@ -30,10 +30,11 @@ const HEIGHTS = { 390: 844, 768: 1024 };
 const DEFAULT_HEIGHT = 900;
 
 const args = process.argv.slice(2);
-const opt = { widths: [], clicks: [], seed: false, empty: false, fullPage: false, name: 'shot', base: null };
+const opt = { widths: [], clicks: [], seed: false, solo: false, empty: false, fullPage: false, name: 'shot', base: null };
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case '--seed': opt.seed = true; break;
+    case '--solo': opt.seed = true; opt.solo = true; break;
     case '--empty': opt.empty = true; break;
     case '--full-page': opt.fullPage = true; break;
     case '--width': opt.widths.push(args[++i]); break;
@@ -115,6 +116,23 @@ function seedBook() {
   };
 }
 
+/**
+ * The same book with Marc taken out of it: one person, her own money, and
+ * nothing to settle. Piggy hides every who-owes-whom field in this shape, so
+ * it needs photographing as its own thing.
+ */
+function soloBook() {
+  const b = seedBook();
+  const split = { mode: 'equal', participants: ['per_lea'], values: {} };
+  const mine = (x) => ({ ...x, accountId: 'acc_lea', split: x.split ? split : x.split });
+  b.people = b.people.filter((p) => p.id === 'per_lea');
+  b.accounts = b.accounts.filter((a) => a.id === 'acc_lea');
+  b.rules = b.rules.map(mine);
+  b.expenses = b.expenses.map(mine);
+  b.settlements = [];
+  return b;
+}
+
 const outDir = resolve('.dev/screenshots');
 mkdirSync(outDir, { recursive: true });
 
@@ -134,7 +152,7 @@ for (const w of opt.widths) {
   });
 
   if (opt.seed) {
-    const book = JSON.stringify(seedBook());
+    const book = JSON.stringify(opt.solo ? soloBook() : seedBook());
     await page.addInitScript(`localStorage.setItem('piggy.ledger.v1', ${JSON.stringify(book)});`);
   }
   await page.goto(baseUrl(), { waitUntil: 'networkidle' });

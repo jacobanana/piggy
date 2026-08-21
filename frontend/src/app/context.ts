@@ -64,6 +64,16 @@ export const baseCur = (): string => S.settings.baseCurrency;
 
 export const rateOf = (code: string): number => fxRateOf(S.settings.rates, code);
 
+/**
+ * A book with one person on it. There is nobody to owe and nobody to repay,
+ * so every field about who paid whom — the tally, the repayment log, the
+ * split editor — is left out rather than shown with one answer in it.
+ */
+export const solo = (): boolean => S.people.length === 1;
+
+/** One place the money can come from, so "paid from" is not a question. */
+export const oneAccount = (): boolean => S.accounts.length < 2;
+
 export function accountLabel(id: string): string {
   const a = account(id);
   if (!a) return '—';

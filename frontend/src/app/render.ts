@@ -1,6 +1,6 @@
 /** All read-only rendering: the ledger bar, the two ledger views, the cards. */
 import type { Expense, Ledger, LedgerItem, MonthKey, Person, Settlement } from '../model/types';
-import { S, UI, account, activeLedger, baseCur, person, rule, save, accountEmoji, accountLabel, toBase } from './context';
+import { S, UI, account, activeLedger, baseCur, person, rule, save, accountEmoji, accountLabel, solo, toBase } from './context';
 import { COLORS } from './theme';
 import { onServer, profile } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
@@ -137,14 +137,11 @@ export function receiptCard(l: Ledger): string {
 
 /* ---------- solo summary ---------- */
 /**
- * A book with one person on it has nothing to tally: every expense is that
- * person's, every balance is zero, and there is nobody to owe. So the receipt
- * says what the ledger has cost instead — which is also how you use Piggy to
- * watch your own spending rather than a shared pot.
- */
-export const solo = (): boolean => S.people.length === 1;
-
-/**
+ * A solo book has nothing to tally: every expense is that person's, every
+ * balance is zero, and there is nobody to owe. So the receipt says what the
+ * ledger has cost instead — which is also how you use Piggy to watch your own
+ * spending rather than a shared pot.
+ *
  * The tally's stand-in. The headline is the whole ledger, deliberately: the
  * month's own total is already in the strip above it, and what that strip
  * can't say is whether this month is a dear one.

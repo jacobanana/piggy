@@ -105,6 +105,12 @@ shape.
 - Money maths happens in integer cents (`frontend/src/domain/`); rounding
   rules (who absorbs the leftover cent) are load-bearing and tested.
 - Planned expenses stay out of every total that describes reality.
+- **A solo book has no who-paid fields.** `solo()` and `oneAccount()` in
+  `app/context.ts` decide it: one person means no split editor, no tally, no
+  repayments anywhere; one account means no "paid from" picker. So a form
+  field can be absent from the DOM — read the account back through
+  `readAccount()` in `app/modals.ts`, never `$('#fAcc')!.value`, or adding an
+  expense on a one-person bank throws.
 - Expenses and settlements snapshot their fx rate; rules use the live table.
 - Enums are VARCHAR + CHECK, never native Postgres enums.
 - The Pages build must never require the backend: no unguarded `/api` calls
