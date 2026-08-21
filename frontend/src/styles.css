@@ -85,6 +85,9 @@ input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
 .icon-btn:hover{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--ink)}
 .ledger-bar{display:flex;gap:8px;overflow-x:auto;padding:10px calc(16px + var(--safe-right)) 12px calc(16px + var(--safe-left));max-width:760px;margin:0 auto;scrollbar-width:none}
 .ledger-bar::-webkit-scrollbar{display:none}
+/* the open list is the one you rename — the pencil says so without a row of
+   its own further down the page */
+.pill.on .pen{font-size:11px;opacity:.75;margin-left:1px}
 /* the sign-in gate: no book on screen, so the chrome has nothing to act on */
 body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none}
 /* a fixed red: --accent is the theme colour and reads as decoration, not alarm */
@@ -107,12 +110,11 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .sub{color:var(--ink-soft);font-size:13px;font-weight:600}
 
 /* ---------- month nav ---------- */
-/* the open list, named, with the pencil that renames it */
-.ledger-head{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
-.ledger-head h2{flex:1;font-size:21px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.monthnav{display:flex;align-items:center;gap:8px;margin:4px 0 14px}
-.monthnav h2{flex:1;text-align:center;font-size:19px}
-.today-link{display:block;text-align:center;margin:-8px 0 14px;font-size:12px;font-weight:700;color:var(--accent);background:none;border:0;cursor:pointer}
+/* The row the month view opens on. The list it belongs to is named once, in
+   the bar above — this says only which month you are looking at. */
+.monthnav{display:flex;align-items:center;gap:8px;margin:14px 0 12px}
+.monthnav h2{flex:1;text-align:center;font-size:18px}
+.today-link{display:block;text-align:center;margin:-6px 0 12px;font-size:12px;font-weight:700;color:var(--accent);background:none;border:0;cursor:pointer}
 
 /* ---------- receipt (signature) ---------- */
 .receipt{position:relative;background:#fff;border:2px solid var(--ink);border-radius:16px;padding:18px;box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden}
@@ -200,14 +202,21 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .empty{text-align:center;padding:18px 10px;color:var(--ink-soft);font-weight:600;font-size:14px}
 .empty .big{font-size:28px;display:block;margin-bottom:5px}
 
-/* ---------- totals strip ---------- */
-.totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
-.totals.four{grid-template-columns:repeat(4,1fr)}
-/* four across gets cramped on a phone — pair them up instead of leaving one orphan */
-@media(max-width:440px){.totals.four{grid-template-columns:repeat(2,1fr)}}
-.tot{border:2px solid var(--line);border-radius:14px;padding:10px;text-align:center;background:#fff}
-.tot .k{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-soft)}
-.tot .v{font-family:var(--mono);font-weight:700;font-size:15px;margin-top:3px}
+/* ---------- the month card ---------- */
+/* What the month cost, then what it is made of. The split replaced a strip of
+   bordered boxes above this card: same numbers, one row, no boxes — and the
+   headline they used to repeat is printed once, here. */
+.monthcard{padding-top:20px}
+.monthcard .figure{font-size:34px}
+.split{display:flex;text-align:center;margin-top:14px}
+.split .sp{flex:1;padding:0 6px;min-width:0}
+.split .sp+.sp{border-left:2px solid var(--line)}
+.split .k{font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-soft)}
+.split .v{font-family:var(--mono);font-weight:700;font-size:14px;margin-top:3px}
+.split .plan .k,.split .plan .v{color:var(--mint)}
+/* the tear is cut to the receipt's padding; the shared build's month card is a
+   plain card, and never carries one */
+.card.monthcard .tear{margin-left:-15px;margin-right:-15px}
 
 /* ---------- buttons ---------- */
 .btn{border:2px solid var(--ink);background:#fff;border-radius:12px;padding:9px 14px;font-weight:800;font-size:14px;cursor:pointer;box-shadow:2px 2px 0 var(--ink);transition:transform .1s ease, box-shadow .1s ease}
