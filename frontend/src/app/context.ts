@@ -30,11 +30,9 @@ export function setState(next: AppState): void { S = next; }
  * `meta.appName` is not a label this build owns: on the self-hosted build it
  * *is* the shared piggy bank's name, because the sync endpoint writes it
  * straight to `Book.name`. So replacing the state renamed the bank for
- * everybody in it — "Erase everything in it" called it Piggy, and an import
- * called it whatever the file did — while the button that did it promised to
- * empty the bank without getting rid of it. A bank is named in exactly two
- * places, the switcher when it is made and the name box in Settings, and
- * neither erasing its contents nor loading a file into it is either of those.
+ * everybody in it — an import called it whatever the file did. A bank is
+ * named in exactly two places, the switcher when it is made and the name box
+ * in this piggy bank's settings, and loading a file into it is neither.
  *
  * `keepName` is false only for a local import, where the export is a
  * whole-app backup and the name in it is part of what is being restored —

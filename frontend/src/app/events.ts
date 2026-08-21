@@ -2,10 +2,10 @@
 import { S, UI, account, activeLedger, ledger, person, rule, save } from './context';
 import { addOnboardSlot, commit, render } from './render';
 import {
-  F, accountForm, addChooser, closeModal, doSettle, expenseForm, ledgerForm, occurrenceModal,
-  onboard, personForm, profileForm, refreshPickBox, refreshSplit, ruleForm, rulesModal, saveAccount,
-  saveExpense, saveLedger, saveOccurrence, savePerson, saveProfile, saveRule, saveSettings, saveSettlement, settingsModal,
-  settleModal, settlementForm, syncPickedAmount, toast,
+  F, accountForm, accountSettingsModal, addChooser, bookSettingsModal, closeModal, doSettle, expenseForm,
+  ledgerForm, occurrenceModal, onboard, personForm, profileForm, refreshPickBox, refreshSplit, ruleForm,
+  rulesModal, saveAccount, saveExpense, saveLedger, saveOccurrence, savePerson, saveProfile, saveRule,
+  saveSettings, saveSettlement, settingsModal, settleModal, settlementForm, syncPickedAmount, toast,
 } from './modals';
 import {
   authEnter, backToEmail, backToSignIn, doSignOut, sendCode, startJoin, startSignUp,
@@ -18,8 +18,6 @@ import {
 } from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { applyTheme } from './theme';
-import { blankState } from '../model/state';
-import { replaceState } from './context';
 import { addMonths, fromCents, monthOf, thisMonth, todayISO, $ } from '../lib/utils';
 import { DEFAULT_RATES } from '../lib/constants';
 
@@ -92,6 +90,8 @@ export function wireEvents(): void {
       case 'rules': rulesModal(); return;
       case 'edit-rule': ruleForm(rule(id)); return;
       case 'settings': settingsModal(); return;
+      case 'book-settings': bookSettingsModal(); return;
+      case 'you-settings': accountSettingsModal(); return;
       case 'save-settings': saveSettings(); return;
       /* Your account's own name and face, not this book's person. */
       case 'profile': profileForm(); return;
@@ -197,7 +197,7 @@ export function wireEvents(): void {
           S.people = S.people.filter((x) => x.id !== id);
           S.accounts = S.accounts.filter((a) => !(a.kind === 'personal' && a.ownership[id]));
           S.accounts.forEach((a) => { delete a.ownership[id]; });
-          closeModal(); commit(); settingsModal();
+          closeModal(); commit(); bookSettingsModal();
         }
         return;
       case 'new-account': accountForm(); return;
@@ -207,13 +207,13 @@ export function wireEvents(): void {
       case 'del-account':
         if (S.expenses.some((x) => x.accountId === id) || S.rules.some((x) => x.accountId === id)) { toast('Still used by some expenses'); return; }
         S.accounts = S.accounts.filter((a) => a.id !== id);
-        closeModal(); commit(); settingsModal(); return;
+        closeModal(); commit(); bookSettingsModal(); return;
       case 'add-cur': {
         const c = ($('#sNewCur') as HTMLInputElement).value.trim().toUpperCase();
         if (c.length === 3) {
           if (!S.settings.rates[c]) S.settings.rates[c] = DEFAULT_RATES[c] || 1;
           if (!S.settings.currencies.includes(c)) S.settings.currencies.push(c);
-          save(); closeModal(); settingsModal();
+          save(); closeModal(); bookSettingsModal();
         }
         return;
       }
@@ -225,15 +225,6 @@ export function wireEvents(): void {
       case 'export': exportJSON(); return;
       case 'export-csv': exportCSV(); return;
       case 'import': ($('#importFile') as HTMLInputElement).click(); return;
-      case 'reset':
-        if (confirm('Erase everything and start over?')) {
-          // Its contents, not its name: on a shared bank the name belongs to
-          // everyone in it, and this button only offered to empty the bank.
-          replaceState(blankState(), true);
-          UI.ledgerId = null; UI.month = thisMonth();
-          closeModal(); commit();
-        }
-        return;
       /* The people only exist once onboarding runs, so this is the first
          moment the book's creator can be linked to one of them — the person
          built from their profile, or the question when it wasn't. */
