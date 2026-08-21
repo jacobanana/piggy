@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, simplifyDebts } from './balances';
+import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, simplifyDebts, spendSummary } from './balances';
 import { blankState } from '../model/state';
 import type { AppState, Expense, Settlement } from '../model/types';
 
@@ -206,5 +206,73 @@ describe('simplifyDebts', () => {
       { from: 'b', to: 'a', cents: 4000 },
       { from: 'c', to: 'a', cents: 2000 },
     ]);
+  });
+});
+
+describe('spendSummary', () => {
+  /** One person, one personal account — the book the tally is useless on. */
+  function solo(): AppState {
+    const s = fixture();
+    s.people = [{ id: 'lea', name: 'Léa', emoji: '🐰', color: '#111' }];
+    s.accounts = [{ id: 'acc-lea', name: "Léa's money", kind: 'personal', ownership: { lea: 1 } }];
+    return s;
+  }
+
+  it('adds up the whole ledger, whatever month is on screen', () => {
+    const s = solo();
+    s.expenses = [
+      expense({ id: 'e1', amount: 100, date: '2025-03-10' }),
+      expense({ id: 'e2', amount: 40, date: '2025-05-02' }),
+    ];
+    const sum = spendSummary(s, 'home', '2025-05');
+    expect(sum.total).toBe(14000);
+    expect(sum.month).toBe(4000);
+    expect(sum.count).toBe(2);
+  });
+
+  it('spreads the total over the months it was spent in, ends included', () => {
+    const s = solo();
+    s.expenses = [
+      expense({ id: 'e1', amount: 100, date: '2025-03-10' }),
+      expense({ id: 'e2', amount: 200, date: '2025-05-02' }),
+    ];
+    const sum = spendSummary(s, 'home', '2025-05');
+    expect(sum.span).toBe(3);          // March, April, May
+    expect(sum.perMonth).toBe(10000);
+    expect(sum.since).toBe('2025-03');
+  });
+
+  /* A quiet ledger must not divide by zero, and an untouched one is not
+     "0 a month across 0 months" — it is simply nothing yet. */
+  it('survives a ledger with nothing on it', () => {
+    const sum = spendSummary(solo(), 'home', '2025-05');
+    expect(sum).toMatchObject({ total: 0, month: 0, count: 0, span: 1, perMonth: 0, since: null });
+  });
+
+  it('keeps planned money out of the spend and counts it on its own', () => {
+    const s = solo();
+    s.expenses = [
+      expense({ id: 'e1', amount: 100, date: '2025-03-10' }),
+      expense({ id: 'e2', amount: 60, date: '2025-03-20', planned: true }),
+    ];
+    const sum = spendSummary(s, 'home', '2025-03');
+    expect(sum.total).toBe(10000);
+    expect(sum.month).toBe(10000);
+    expect(sum.count).toBe(1);
+    expect(sum.planned).toBe(6000);
+  });
+
+  it('converts foreign spending at the rate the entry snapshotted', () => {
+    const s = solo();
+    s.expenses = [expense({ amount: 100, currency: 'EUR', fxRate: 0.95, date: '2025-03-10' })];
+    expect(spendSummary(s, 'home', '2025-03').total).toBe(9500);
+  });
+
+  it('has no month figure when the scope has none — a trip', () => {
+    const s = solo();
+    s.expenses = [expense({ amount: 100, date: '2025-03-10' })];
+    const sum = spendSummary(s, 'home', null);
+    expect(sum.total).toBe(10000);
+    expect(sum.month).toBe(0);
   });
 });

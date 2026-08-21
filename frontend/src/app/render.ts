@@ -5,7 +5,7 @@ import { COLORS } from './theme';
 import { onServer, profile } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, cents, dayLabel, esc, fromCents, money, monthLabel, monthOf, thisMonth } from '../lib/utils';
-import { computeBalances, categoryTotals, paidByTotals, settlementsFor, simplifyDebts } from '../domain/balances';
+import { computeBalances, categoryTotals, paidByTotals, settlementsFor, simplifyDebts, spendSummary } from '../domain/balances';
 import { occurrencesFor, plannedInScope, plannedShares, upcomingRules } from '../domain/selectors';
 
 export function commit(): void { save(); render(); }
@@ -135,6 +135,50 @@ export function receiptCard(l: Ledger): string {
     '</div>';
 }
 
+/* ---------- solo summary ---------- */
+/**
+ * A book with one person on it has nothing to tally: every expense is that
+ * person's, every balance is zero, and there is nobody to owe. So the receipt
+ * says what the ledger has cost instead — which is also how you use Piggy to
+ * watch your own spending rather than a shared pot.
+ */
+export const solo = (): boolean => S.people.length === 1;
+
+/**
+ * The tally's stand-in. The headline is the whole ledger, deliberately: the
+ * month's own total is already in the strip above it, and what that strip
+ * can't say is whether this month is a dear one.
+ */
+function summaryCard(l: Ledger, mk: MonthKey): string {
+  const sum = spendSummary(S, l.id, mk);
+  if (!sum.count && !sum.planned) {
+    return '<div class="receipt" style="padding-top:22px">' +
+      '<div class="receipt-title">spent so far · ' + esc(baseCur()) + '</div>' +
+      '<div class="empty"><span class="big">🐷</span>Nothing spent yet.<br>Tap ＋ Add and this is where it adds up.</div></div>';
+  }
+  const compare = (): string => {
+    if (sum.span < 2 || !sum.count) return '';
+    const d = sum.month - sum.perMonth;
+    if (Math.abs(d) < 100) return 'Bang on a usual month.';
+    return money(fromCents(Math.abs(d)), baseCur()) + (d > 0 ? ' more' : ' less') + ' than a usual month.';
+  };
+  const row = (k: string, v: string): string =>
+    '<div class="rrow"><span>' + k + '</span><span class="dots"></span><span class="val">' + v + '</span></div>';
+  const note = compare();
+
+  return '<div class="receipt" style="padding-top:22px">' +
+    '<div class="receipt-title">spent so far · ' + esc(baseCur()) + '</div>' +
+    '<div class="figure">' + fromCents(sum.total).toFixed(2) + '</div>' +
+    '<div class="figure-cap">' + sum.count + ' entr' + (sum.count === 1 ? 'y' : 'ies') +
+    (sum.since ? ' since <b>' + esc(monthLabel(sum.since)) + '</b>' : '') + '</div>' +
+    '<div class="tear"></div>' +
+    row(esc(monthLabel(mk)), fromCents(sum.month).toFixed(2)) +
+    (sum.span > 1 ? row('a usual month', fromCents(sum.perMonth).toFixed(2)) : '') +
+    (sum.planned ? row('still to pay', fromCents(sum.planned).toFixed(2)) : '') +
+    (note ? '<div class="hint center" style="margin-top:10px">' + esc(note) + '</div>' : '') +
+    '</div>';
+}
+
 /* ---------- repayments ---------- */
 /** An item a repayment was logged against — an expense, or a month of a bill. */
 function itemLabel(id: string): string {
@@ -236,14 +280,19 @@ function plannedCard(l: Ledger, monthKey: MonthKey | null): string {
   if (!list.length) return '';
   const total = list.reduce((s, e) => s + cents(toBase(e.amount, e.currency, e.fxRate)), 0);
   const shares = plannedShares(S, list);
-  return '<div class="card"><div class="card-head"><h2>🗓️ Still to pay</h2>' +
-    '<span class="sub">' + money(fromCents(total), baseCur()) + '</span></div>' +
-    '<div class="list">' + list.map((e) => itemRow(e, { markPaid: true })).join('') + '</div>' +
-    '<div class="divider"></div>' +
+  /* Whose share it'll be, and the tally it isn't on yet, both need somebody
+     to owe: with one person on the book the total above already says it. */
+  const split = solo() ? '' : '<div class="divider"></div>' +
     '<div class="receipt-title">whose share, once paid</div>' +
     S.people.map((p) => '<div class="rrow"><span>' + esc(p.emoji) + ' ' + esc(p.name) + '</span><span class="dots"></span>' +
-      '<span class="val">' + fromCents(shares[p.id] || 0).toFixed(2) + '</span></div>').join('') +
-    '<div class="hint">Nothing here counts towards the tally yet — nobody is out of pocket until it\'s paid. Tap <b>Paid</b> once the money actually goes.</div>' +
+      '<span class="val">' + fromCents(shares[p.id] || 0).toFixed(2) + '</span></div>').join('');
+  return '<div class="card"><div class="card-head"><h2>🗓️ Still to pay</h2>' +
+    '<span class="sub">' + money(fromCents(total), baseCur()) + '</span></div>' +
+    '<div class="list">' + list.map((e) => itemRow(e, { markPaid: true })).join('') + '</div>' + split +
+    '<div class="hint">' + (solo()
+      ? 'Nothing here counts as spent yet — the money hasn\'t gone.'
+      : 'Nothing here counts towards the tally yet — nobody is out of pocket until it\'s paid.') +
+    ' Tap <b>Paid</b> once the money actually goes.</div>' +
     '</div>';
 }
 
@@ -273,7 +322,7 @@ function householdView(l: Ledger): string {
     <div class="tot" style="border-color:var(--ink)"><div class="k">${planTotal ? 'Paid' : 'Total'} ${esc(baseCur())}</div><div class="v">${fromCents(recTotal + adTotal).toFixed(0)}</div></div>
   </div>`;
 
-  out += receiptCard(l);
+  out += solo() ? summaryCard(l, mk) : receiptCard(l);
 
   out += '<div class="card"><div class="card-head"><h2>🔁 Recurring</h2>' +
     '<button class="btn soft sm" data-act="rules">Manage</button></div>' +
@@ -288,7 +337,7 @@ function householdView(l: Ledger): string {
     '</div>';
 
   out += plannedCard(l, mk);
-  out += repaymentsCard(l);
+  if (!solo()) out += repaymentsCard(l);
   out += catCard(l.id, mk);
 
   if (soon.length) {
@@ -331,7 +380,9 @@ function tripView(l: Ledger): string {
       ' planned · <b>' + money(fromCents(total + planTotal), baseCur()) + '</b> all in</div>' : '') +
     '</div>';
 
-  out += receiptCard(l);
+  /* The card above already says what the trip cost and how much is still
+     to pay, so a solo trip needs no summary of its own — only no tally. */
+  if (!solo()) out += receiptCard(l);
 
   if (!items.length) {
     out += '<div class="card"><div class="empty"><span class="big">🧳</span>' +
@@ -343,7 +394,7 @@ function tripView(l: Ledger): string {
       ).join('') + '</div>';
   }
   out += plannedCard(l, null);
-  out += repaymentsCard(l);
+  if (!solo()) out += repaymentsCard(l);
   if (items.length) out += catCard(l.id, null);
   return out;
 }
