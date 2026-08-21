@@ -62,7 +62,12 @@
   <div class="topbar-in">
     <div class="brand"><span class="pig">🐷</span><span id="brandName">Piggy</span></div>
     <div class="spacer"></div>
-    <button class="icon-btn" data-act="rules" title="Recurring bills">🔁</button>
+    <!--
+      One button up here, and it is the way in to everything that isn't an
+      expense. Recurring bills used to sit beside it as a 🔁 of their own —
+      but they belong to a list, not to the app, and the Recurring card in
+      the month view already opens the same sheet from where they are read.
+    -->
     <button class="icon-btn" data-act="settings" title="Settings">⚙️</button>
   </div>
   <div class="ledger-bar" id="ledgerBar"></div>

@@ -656,18 +656,41 @@ export function saveLedger(id?: string): void {
 
 /* ---------- settings ---------- */
 /**
- * Two zones, in this order and never mixed: everything this piggy bank keeps
- * for itself, then the handful of things that are yours across all of them.
- * They used to be interleaved, so "Piggy banks" and "Sign out" sat under the
- * same sheet as this book's people and rates and read as its settings too.
- * Which bank you are in, and what happens to it, is the switcher's job now.
+ * ⚙️ is a fork, not a sheet. Two different things hide behind it: the piggy
+ * bank's own settings — its people, accounts, currencies, look and data, all
+ * of which everyone sharing it sees — and your account's, which are yours
+ * alone and follow you into every bank you open. One long sheet made the
+ * second look like more of the first, so you pick which one you came for.
+ *
+ * The Pages build has no account to pick, so there is nothing to fork: ⚙️
+ * opens the bank's settings directly there.
  */
 export function settingsModal(): void {
+  if (!onServer()) { bookSettingsModal(); return; }
+  const me = myProfile();
+  openModal(head('Settings') +
+    '<div class="list">' +
+    '<div class="item" data-act="book-settings"><div class="emo">🐷</div>' +
+    '<div class="item-main"><div class="name">' + esc(S.meta.appName || 'This piggy bank') + '</div>' +
+    '<div class="meta">people, accounts, currencies, look and data</div></div><span class="sub">›</span></div>' +
+    '<div class="item" data-act="you-settings">' +
+    '<span class="avatar lg" style="background:var(--tint);border-color:var(--ink)">' + esc(me.emoji) + '</span>' +
+    '<div class="item-main"><div class="name">' + esc(me.name || 'Your account') + '</div>' +
+    '<div class="meta">your name and face, your piggy banks, signing out</div></div><span class="sub">›</span></div>' +
+    '</div>' +
+    '<div class="hint">Everything in the first belongs to this piggy bank and to everyone sharing it. The second is yours wherever you sign in.</div>');
+}
+
+/** Back to the fork — both halves carry it, so neither is a dead end. */
+const backToSettings = '<button class="btn soft sm" data-act="settings">‹ Back</button>';
+
+/** This piggy bank: what it keeps, and what everyone sharing it can see. */
+export function bookSettingsModal(): void {
   const rates = Array.from(new Set([...S.settings.currencies, ...Object.keys(S.settings.rates)])).filter((c) => c !== baseCur());
-  openModal(head('Settings') + `
+  openModal(head('This piggy bank', onServer() ? backToSettings : undefined) + `
     <div class="card-head"><h2>🐷 ${esc(S.meta.appName || 'This piggy bank')}</h2></div>
     <div class="hint" style="margin:-8px 0 14px">${onServer()
-      ? 'Everything down to “Your account” belongs to this piggy bank alone — its name, people, accounts, currencies and look. The others keep their own.'
+      ? 'Its name, people, accounts, currencies, look and data — everything here belongs to this piggy bank alone, and everyone sharing it sees it. The others keep their own.'
       : 'The people, accounts, currencies and look this piggy bank keeps.'}</div>
     <div class="field"><label>Piggy bank name</label><input class="input" id="sName" value="${esc(S.meta.appName)}"></div>
     <div class="divider"></div>
@@ -710,21 +733,27 @@ export function settingsModal(): void {
     <div class="hint">${onServer()
       ? 'This book lives on the server, so it follows you to any device you sign in on. Import loads a Piggy export straight into it; export gives you the full, portable data model back.'
       : 'Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.'}</div>
-    <div style="margin-top:14px"><button class="btn danger wide" data-act="reset">Erase everything in it</button></div>
-    <div class="hint">Empties this piggy bank without getting rid of it${onServer() ? ' — deleting it for good is under Your piggy banks' : ''}.</div>
-    <input type="file" id="importFile" accept="application/json" style="display:none">
-    ${onServer() ? '<div class="divider"></div><div class="card-head"><h2>👤 Your account</h2></div>' +
-      '<div class="list"><div class="item" data-act="profile">' +
-      '<span class="avatar lg" style="background:var(--tint);border-color:var(--ink)">' + esc(myProfile().emoji) + '</span>' +
-      '<div class="item-main"><div class="name">' + esc(myProfile().name) + '</div>' +
-      '<div class="meta"><span>' + esc(session.user ? session.user.email : '') + '</span></div></div>' +
-      '<span class="sub">edit</span></div></div>' +
-      '<div class="hint">Your name and face, yours across every piggy bank rather than this one\'s. ' +
-      'A new piggy bank starts its first person off with them.</div>' +
-      '<div class="row-btns" style="margin-top:12px">' +
-      '<button class="btn soft" data-act="banks">🏦 Your piggy banks</button>' +
-      '<button class="btn soft" data-act="signout">Sign out</button></div>' +
-      '<div class="hint">Switching, inviting, leaving and deleting all live there.</div>' : ''}`);
+    <input type="file" id="importFile" accept="application/json" style="display:none">`);
+}
+
+/**
+ * Your account: the you that every piggy bank starts from. Nothing in here
+ * belongs to the open book, which is the whole reason it is its own sheet.
+ */
+export function accountSettingsModal(): void {
+  const me = myProfile();
+  openModal(head('Your account', backToSettings) +
+    '<div class="list"><div class="item" data-act="profile">' +
+    '<span class="avatar lg" style="background:var(--tint);border-color:var(--ink)">' + esc(me.emoji) + '</span>' +
+    '<div class="item-main"><div class="name">' + esc(me.name) + '</div>' +
+    '<div class="meta"><span>' + esc(session.user ? session.user.email : '') + '</span></div></div>' +
+    '<span class="sub">edit</span></div></div>' +
+    '<div class="hint">Your name and face, yours across every piggy bank rather than any one of them. ' +
+    'A new piggy bank starts its first person off with them.</div>' +
+    '<div class="row-btns" style="margin-top:12px">' +
+    '<button class="btn soft" data-act="banks">🏦 Your piggy banks</button>' +
+    '<button class="btn soft" data-act="signout">Sign out</button></div>' +
+    '<div class="hint">Switching, inviting, leaving and deleting all live there.</div>');
 }
 import { dayLabel as dayLabel2 } from '../lib/utils';
 export function saveSettings(): void {
@@ -792,7 +821,7 @@ export function savePerson(id?: string): void {
       ids.forEach((i, k) => { a.ownership[i] = k === ids.length - 1 ? r2(1 - sh * (ids.length - 1)) : sh; });
     });
   }
-  closeModal(); commit(); settingsModal();
+  closeModal(); commit(); bookSettingsModal();
 }
 /* ---------- your profile: the you that every piggy bank starts from ---------- */
 
@@ -824,7 +853,7 @@ export async function saveProfile(): Promise<void> {
   } catch (err) {
     toast(err instanceof Error ? err.message : "Couldn't save your profile."); return;
   }
-  closeModal(); settingsModal(); toast('Saved 👤');
+  closeModal(); accountSettingsModal(); toast('Saved 👤');
 }
 
 export function accountForm(a?: Account): void {
@@ -868,7 +897,7 @@ export function saveAccount(id?: string): void {
   } else {
     S.accounts.push(Object.assign({ id: uid('acc_') }, data));
   }
-  closeModal(); commit(); settingsModal();
+  closeModal(); commit(); bookSettingsModal();
 }
 
 /* ---------- add chooser + onboarding ---------- */

@@ -304,7 +304,14 @@ function householdView(l: Ledger): string {
   const planTotal = plannedInScope(S, l.id, mk).reduce((s, e) => s + cents(toBase(e.amount, e.currency, e.fxRate)), 0);
   const soon = upcomingRules(S, l.id, mk, 12);
 
+  /* The list's own name and the pencil that renames it. A trip has carried
+     both since it had a card of its own; a household list had neither, so the
+     "Home" onboarding makes was the one thing in Piggy nothing could rename. */
   let out = `
+  <div class="ledger-head">
+    <h2>${esc(l.emoji)} ${esc(l.name)}</h2>
+    <button class="icon-btn" data-act="edit-ledger" data-id="${l.id}" title="Rename this list">✏️</button>
+  </div>
   <div class="monthnav">
     <button class="icon-btn" data-act="month" data-v="-1">‹</button>
     <h2>${monthLabel(mk)}</h2>

@@ -107,6 +107,9 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .sub{color:var(--ink-soft);font-size:13px;font-weight:600}
 
 /* ---------- month nav ---------- */
+/* the open list, named, with the pencil that renames it */
+.ledger-head{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
+.ledger-head h2{flex:1;font-size:21px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .monthnav{display:flex;align-items:center;gap:8px;margin:4px 0 14px}
 .monthnav h2{flex:1;text-align:center;font-size:19px}
 .today-link{display:block;text-align:center;margin:-8px 0 14px;font-size:12px;font-weight:700;color:var(--accent);background:none;border:0;cursor:pointer}

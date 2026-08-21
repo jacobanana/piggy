@@ -2,7 +2,7 @@
 import { S, UI, baseCur, person, replaceState, save, accountLabel, toBase } from './context';
 import { commit } from './render';
 import { onServer } from './session';
-import { closeModal, settingsModal, toast } from './modals';
+import { bookSettingsModal, closeModal, toast } from './modals';
 import { itemsInScope } from '../domain/selectors';
 import { settlementsFor } from '../domain/balances';
 import { r2, todayISO } from '../lib/utils';
@@ -70,7 +70,7 @@ export async function fetchRates(): Promise<void> {
       if (v > 0) S.settings.rates[c] = r2(1 / v * 10000) / 10000;
     });
     S.settings.ratesUpdatedAt = new Date().toISOString();
-    save(); closeModal(); settingsModal(); toast('Rates updated');
+    save(); closeModal(); bookSettingsModal(); toast('Rates updated');
   } catch {
     toast("Couldn't reach the rate service — type them in");
   }
