@@ -43,10 +43,19 @@ export function render(): void {
   const fab = $('#fab'); if (fab) fab.style.display = 'flex';
 }
 
+/**
+ * The switcher, and the only place the open list is named. The month view used
+ * to head itself with the same emoji and the same word, two lines under the
+ * pill that already said it — so the pill took the pencil over with the name:
+ * tapping the list you are already in is what renames it.
+ */
 function renderLedgerBar(): void {
-  const bar = S.ledgers.filter((l) => !l.archived).map((l) =>
-    '<button class="pill ' + (l.id === UI.ledgerId ? 'on' : '') + '" data-act="ledger" data-id="' + l.id + '">' + esc(l.emoji) + ' ' + esc(l.name) + '</button>'
-  ).join('');
+  const bar = S.ledgers.filter((l) => !l.archived).map((l) => {
+    const on = l.id === UI.ledgerId;
+    return '<button class="pill ' + (on ? 'on' : '') + '" data-act="' + (on ? 'edit-ledger' : 'ledger') + '" data-id="' + l.id + '"' +
+      (on ? ' title="Rename this list"' : '') + '>' + esc(l.emoji) + ' ' + esc(l.name) +
+      (on ? '<span class="pen">✏️</span>' : '') + '</button>';
+  }).join('');
   const el = $('#ledgerBar');
   if (el) el.innerHTML = bar + '<button class="pill ghost" data-act="new-ledger">＋ New list</button>';
 }
@@ -135,45 +144,64 @@ export function receiptCard(l: Ledger): string {
     '</div>';
 }
 
-/* ---------- solo summary ---------- */
+/* ---------- the month ---------- */
 /**
- * A solo book has nothing to tally: every expense is that person's, every
- * balance is zero, and there is nobody to owe. So the receipt says what the
- * ledger has cost instead — which is also how you use Piggy to watch your own
- * spending rather than a shared pot.
+ * One card for the month: what it cost, and what that is made of.
  *
- * The tally's stand-in. The headline is the whole ledger, deliberately: the
- * month's own total is already in the strip above it, and what that strip
- * can't say is whether this month is a dear one.
+ * It stands where a strip of four bordered boxes used to sit above the
+ * receipt — the strip said the month's total, and then the receipt said the
+ * same number again two rows down, under a heading that repeated the month
+ * already printed in the nav. The figure is the month the nav is on; the
+ * split under it is the same recurring / extras / planned numbers the strip
+ * carried, without a box drawn round each one.
+ *
+ * A solo book has no tally to hold the whole-ledger view, so the card carries
+ * it as a tail — but only when the ledger is wider than the month on screen.
+ * With a single month of entries the two are the same number, and printing it
+ * twice was the complaint that started all this.
  */
-function summaryCard(l: Ledger, mk: MonthKey): string {
+function monthCard(l: Ledger, mk: MonthKey, t: { rec: number; extra: number; plan: number }): string {
+  const soloBook = solo();
+  const paid = t.rec + t.extra;
   const sum = spendSummary(S, l.id, mk);
-  if (!sum.count && !sum.planned) {
-    return '<div class="receipt" style="padding-top:22px">' +
-      '<div class="receipt-title">spent so far · ' + esc(baseCur()) + '</div>' +
-      '<div class="empty"><span class="big">🐷</span>Nothing spent yet.<br>Tap ＋ Add and this is where it adds up.</div></div>';
-  }
-  const compare = (): string => {
-    if (sum.span < 2 || !sum.count) return '';
-    const d = sum.month - sum.perMonth;
-    if (Math.abs(d) < 100) return 'Bang on a usual month.';
-    return money(fromCents(Math.abs(d)), baseCur()) + (d > 0 ? ' more' : ' less') + ' than a usual month.';
-  };
-  const row = (k: string, v: string): string =>
-    '<div class="rrow"><span>' + k + '</span><span class="dots"></span><span class="val">' + v + '</span></div>';
-  const note = compare();
+  /* The signature receipt belongs to whichever card is the book's headline:
+     the tally on a shared book, this one when there is no tally to have. */
+  const shell = (body: string): string =>
+    '<div class="' + (soloBook ? 'receipt' : 'card') + ' monthcard">' + body + '</div>';
+  /* Not the month's name: the nav directly above it is already the month, and
+     saying it again here is what this card was rebuilt to stop doing. */
+  const title = '<div class="receipt-title">spent · ' + esc(baseCur()) + '</div>';
 
-  return '<div class="receipt" style="padding-top:22px">' +
-    '<div class="receipt-title">spent so far · ' + esc(baseCur()) + '</div>' +
-    '<div class="figure">' + fromCents(sum.total).toFixed(2) + '</div>' +
-    '<div class="figure-cap">' + sum.count + ' entr' + (sum.count === 1 ? 'y' : 'ies') +
-    (sum.since ? ' since <b>' + esc(monthLabel(sum.since)) + '</b>' : '') + '</div>' +
-    '<div class="tear"></div>' +
-    row(esc(monthLabel(mk)), fromCents(sum.month).toFixed(2)) +
-    (sum.span > 1 ? row('a usual month', fromCents(sum.perMonth).toFixed(2)) : '') +
-    (sum.planned ? row('still to pay', fromCents(sum.planned).toFixed(2)) : '') +
-    (note ? '<div class="hint center" style="margin-top:10px">' + esc(note) + '</div>' : '') +
-    '</div>';
+  if (soloBook && !sum.count && !sum.planned) {
+    return shell(title + '<div class="empty"><span class="big">🐷</span>Nothing spent yet.<br>Tap ＋ Add and this is where it adds up.</div>');
+  }
+
+  const cells: [string, number, string][] = [['recurring', t.rec, ''], ['extras', t.extra, '']];
+  if (t.plan) cells.push(['planned', t.plan, ' plan']);
+  const split = '<div class="split">' + cells.map(([k, v, cls]) =>
+    '<div class="sp' + cls + '"><div class="k">' + k + '</div><div class="v">' + fromCents(v).toFixed(2) + '</div></div>').join('') + '</div>';
+
+  /* Whether this month is a dear one — the one thing the strip could never
+     say, and the reason the solo tail is worth its rows at all. */
+  let tail = '';
+  if (soloBook && sum.total !== paid) {
+    const d = sum.month - sum.perMonth;
+    const note = sum.span < 2 ? ''
+      : Math.abs(d) < 100 ? 'Bang on a usual month.'
+      : money(fromCents(Math.abs(d)), baseCur()) + (d > 0 ? ' more' : ' less') + ' than a usual month.';
+    /* The month it all started in reads as a sentence, not as a row label:
+       a dotted row is one line, and "since January 2025" wrapped it onto a
+       second with the figure stranded up on the first. */
+    const since = sum.since && sum.since !== mk ? 'Since ' + monthLabel(sum.since) + '.' : '';
+    const foot = [since, note].filter(Boolean).join(' ');
+    const row = (k: string, v: string): string =>
+      '<div class="rrow"><span>' + k + '</span><span class="dots"></span><span class="val">' + v + '</span></div>';
+    tail = '<div class="tear"></div>' +
+      (sum.span > 1 ? row('a usual month', fromCents(sum.perMonth).toFixed(2)) : '') +
+      row('all time · ' + sum.count + ' entr' + (sum.count === 1 ? 'y' : 'ies'), fromCents(sum.total).toFixed(2)) +
+      (foot ? '<div class="hint center" style="margin-top:10px">' + esc(foot) + '</div>' : '');
+  }
+  return shell(title + '<div class="figure">' + fromCents(paid).toFixed(2) + '</div>' + split + tail);
 }
 
 /* ---------- repayments ---------- */
@@ -304,29 +332,19 @@ function householdView(l: Ledger): string {
   const planTotal = plannedInScope(S, l.id, mk).reduce((s, e) => s + cents(toBase(e.amount, e.currency, e.fxRate)), 0);
   const soon = upcomingRules(S, l.id, mk, 12);
 
-  /* The list's own name and the pencil that renames it. A trip has carried
-     both since it had a card of its own; a household list had neither, so the
-     "Home" onboarding makes was the one thing in Piggy nothing could rename. */
+  /* Which month, and nothing else. The list had a heading row here — its
+     emoji and its name, directly under the pill in the bar that already said
+     both — and the rename pencil beside it; the pill carries that now. */
   let out = `
-  <div class="ledger-head">
-    <h2>${esc(l.emoji)} ${esc(l.name)}</h2>
-    <button class="icon-btn" data-act="edit-ledger" data-id="${l.id}" title="Rename this list">✏️</button>
-  </div>
   <div class="monthnav">
-    <button class="icon-btn" data-act="month" data-v="-1">‹</button>
+    <button class="icon-btn" data-act="month" data-v="-1" aria-label="Previous month">‹</button>
     <h2>${monthLabel(mk)}</h2>
-    <button class="icon-btn" data-act="month" data-v="1">›</button>
+    <button class="icon-btn" data-act="month" data-v="1" aria-label="Next month">›</button>
   </div>`;
   if (mk !== thisMonth()) out += '<button class="today-link" data-act="month" data-v="0">jump back to today</button>';
 
-  out += `<div class="totals${planTotal ? ' four' : ''}">
-    <div class="tot"><div class="k">Recurring</div><div class="v">${fromCents(recTotal).toFixed(0)}</div></div>
-    <div class="tot"><div class="k">Extras</div><div class="v">${fromCents(adTotal).toFixed(0)}</div></div>
-    ${planTotal ? '<div class="tot" style="border-color:var(--mint)"><div class="k">Planned</div><div class="v" style="color:var(--mint)">' + fromCents(planTotal).toFixed(0) + '</div></div>' : ''}
-    <div class="tot" style="border-color:var(--ink)"><div class="k">${planTotal ? 'Paid' : 'Total'} ${esc(baseCur())}</div><div class="v">${fromCents(recTotal + adTotal).toFixed(0)}</div></div>
-  </div>`;
-
-  out += solo() ? summaryCard(l, mk) : receiptCard(l);
+  out += monthCard(l, mk, { rec: recTotal, extra: adTotal, plan: planTotal });
+  if (!solo()) out += receiptCard(l);
 
   out += '<div class="card"><div class="card-head"><h2>🔁 Recurring</h2>' +
     '<button class="btn soft sm" data-act="rules">Manage</button></div>' +
@@ -374,10 +392,11 @@ function tripView(l: Ledger): string {
   items.forEach((e) => { (days[e.date] = days[e.date] || []).push(e); });
   const range = [l.startDate, l.endDate].filter(Boolean).map((d) => dayLabel(d as string)).join(' → ');
 
+  /* Named once, in the bar — this card says what the trip has cost and when
+     it runs, which is what you came to it for. Renaming is the pill's job. */
   let out = '<div class="card" style="margin-top:16px"><div class="card-head">' +
-    '<h2 style="font-size:21px">' + esc(l.emoji) + ' ' + esc(l.name) + '</h2>' +
-    '<button class="icon-btn" data-act="edit-ledger" data-id="' + l.id + '">✏️</button></div>' +
-    '<div class="sub">' + (range || 'no dates set') + ' · ' + items.length + ' expense' + (items.length === 1 ? '' : 's') +
+    '<h2 style="font-size:19px">' + esc(range || 'The trip so far') + '</h2></div>' +
+    '<div class="sub">' + items.length + ' expense' + (items.length === 1 ? '' : 's') +
     (planned.length ? ' · ' + planned.length + ' still to pay' : '') + '</div>' +
     '<div class="mono" style="font-size:30px;font-weight:700;margin-top:10px">' + money(fromCents(total), baseCur()) + '</div>' +
     (planTotal ? '<div class="sub" style="margin-top:4px">＋ ' + money(fromCents(planTotal), baseCur()) +
