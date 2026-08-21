@@ -1,6 +1,6 @@
 /** Modal forms and their save handlers. Transient form state lives in F. */
 import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
-import { S, UI, account, activeLedger, baseCur, ledger, person, rateOf, rule, accountEmoji, accountLabel } from './context';
+import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
 import { faceForName, myPersonId, onServer, profile, session, syncBookName } from './session';
@@ -72,6 +72,23 @@ function methodOptions(sel?: string): string {
   return METHODS.map((m) => '<option value="' + m[0] + '" ' + (m[0] === sel ? 'selected' : '') + '>' + m[1] + '</option>').join('');
 }
 
+/**
+ * The "paid from" picker — left out when the book holds a single account,
+ * because a dropdown with one answer in it is a question nobody asked. The
+ * save handlers read it back through `readAccount`, which falls through to
+ * that one account when the field was never drawn.
+ */
+function accountField(label: string, sel?: string, id?: string, labelId?: string): string {
+  if (oneAccount()) return '';
+  return '<div class="field"><label' + (labelId ? ' id="' + labelId + '"' : '') + '>' + esc(label) + '</label>' +
+    '<select class="input" id="' + (id || 'fAcc') + '">' + accountOptions(sel) + '</select></div>';
+}
+const readAccount = (id: string, fallback?: string): string =>
+  $<HTMLSelectElement>('#' + id)?.value || fallback || (S.accounts[0] || {}).id || '';
+
+/** Two fields side by side — or, when one of them is missing, the other alone. */
+const twoUp = (a: string, b: string): string => (a && b ? '<div class="two">' + a + b + '</div>' : a + b);
+
 /* ---------- split editor ---------- */
 export function splitBox(): string {
   const sp = F.split!;
@@ -101,6 +118,14 @@ export function splitBox(): string {
 export function refreshSplit(): void {
   const el = $('#splitBox');
   if (el) el.innerHTML = splitBox();
+}
+/**
+ * The split editor, unless there is nobody to split with: on a solo book it
+ * is one chip that can never be unticked. `initSplit` has already put that
+ * person in `F.split`, so `readSplit` saves the same thing either way.
+ */
+function splitField(): string {
+  return solo() ? '' : '<div class="field"><label>Who\'s it for?</label><div id="splitBox">' + splitBox() + '</div></div>';
 }
 function readSplit(): Split {
   const f = F.split!;
@@ -172,12 +197,12 @@ export function expenseForm(exp?: Expense): void {
       <button type="button" data-act="exp-planned" data-v="1" class="${e.planned ? 'on' : ''}">Still to pay</button></div>
       <div class="hint">Something booked but not paid — a hotel, a deposit — counts towards the budget and stays out of the tally until the money actually goes.</div>
     </div>
-    <div class="two">
-      <div class="field"><label id="dateLbl">${e.planned ? 'Due' : 'Date'}</label><input class="input" id="fDate" type="date" value="${e.date}"></div>
-      <div class="field"><label id="accLbl">${e.planned ? "Who'll pay" : 'Paid from'}</label><select class="input" id="fAcc">${accountOptions(e.accountId)}</select></div>
-    </div>
+    ${twoUp(
+      `<div class="field"><label id="dateLbl">${e.planned ? 'Due' : 'Date'}</label><input class="input" id="fDate" type="date" value="${e.date}"></div>`,
+      accountField(e.planned ? "Who'll pay" : 'Paid from', e.accountId, 'fAcc', 'accLbl'),
+    )}
     <div class="field"><label>How</label><select class="input" id="fMethod">${methodOptions(e.method)}</select></div>
-    <div class="field"><label>Who's it for?</label><div id="splitBox">${splitBox()}</div></div>
+    ${splitField()}
     <div class="field"><label>Note (optional)</label><input class="input" id="fNotes" value="${esc(e.notes || '')}" placeholder="—"></div>
     <div class="row-btns">
       <button class="btn primary" style="flex:1" data-act="save-exp" data-id="${e.id || ''}">${isNew ? 'Add it 🎉' : 'Save changes'}</button>
@@ -199,19 +224,19 @@ export function clampToTrip(l: Ledger): string {
 }
 export function saveExpense(id?: string): void {
   const l = activeLedger()!;
+  const was = id ? S.expenses.find((x) => x.id === id) : undefined;
   const name = ($('#fName') as HTMLInputElement).value.trim() || 'Expense';
   const data = {
     ledgerId: l.id, name, emoji: F.emoji!,
     amount: r2(readAmount()), currency: ($('#fCur') as HTMLSelectElement).value, fxRate: readRate(),
     date: ($('#fDate') as HTMLInputElement).value || todayISO(),
-    accountId: ($('#fAcc') as HTMLSelectElement).value,
+    accountId: readAccount('fAcc', was?.accountId),
     method: ($('#fMethod') as HTMLSelectElement).value as Expense['method'],
     planned: !!F.planned,
     split: readSplit(), notes: ($('#fNotes') as HTMLInputElement).value.trim(),
   };
-  if (id) {
-    const e = S.expenses.find((x) => x.id === id);
-    if (e) Object.assign(e, data);
+  if (was) {
+    Object.assign(was, data);
   } else {
     S.expenses.push(Object.assign({ id: uid('exp_'), createdAt: new Date().toISOString() }, data));
   }
@@ -241,11 +266,11 @@ export function ruleForm(r?: Rule): void {
       <div class="field"><label>First charge</label><input class="input" id="fStart" type="month" value="${x.startMonth}"></div>
       <div class="field"><label>Last charge (optional)</label><input class="input" id="fEnd" type="month" value="${x.endMonth || ''}"></div>
     </div>
-    <div class="two">
-      <div class="field"><label>Paid from</label><select class="input" id="fAcc">${accountOptions(x.accountId)}</select></div>
-      <div class="field"><label>How</label><select class="input" id="fMethod">${methodOptions(x.method)}</select></div>
-    </div>
-    <div class="field"><label>Who's it for?</label><div id="splitBox">${splitBox()}</div></div>
+    ${twoUp(
+      accountField('Paid from', x.accountId),
+      `<div class="field"><label>How</label><select class="input" id="fMethod">${methodOptions(x.method)}</select></div>`,
+    )}
+    ${splitField()}
     <div class="field"><label>Note (optional)</label><input class="input" id="fNotes" value="${esc(x.notes || '')}" placeholder="—"></div>
     ${x.id ? '<div class="field"><label>Status</label><div class="seg"><button type="button" data-act="rule-active" data-v="1" class="' + (x.active ? 'on' : '') + '">Active</button><button type="button" data-act="rule-active" data-v="0" class="' + (!x.active ? 'on' : '') + '">Paused</button></div></div>' : ''}
     <div class="row-btns">
@@ -261,6 +286,7 @@ export function ruleForm(r?: Rule): void {
 }
 export function saveRule(id?: string): void {
   const l = activeLedger()!;
+  const was = id ? rule(id) : undefined;
   const data = {
     ledgerId: l.id, name: ($('#fName') as HTMLInputElement).value.trim() || 'Bill', emoji: F.emoji!,
     amount: r2(readAmount()), currency: ($('#fCur') as HTMLSelectElement).value,
@@ -268,14 +294,13 @@ export function saveRule(id?: string): void {
     dueDay: Math.max(1, Math.min(31, Number(($('#fDay') as HTMLInputElement).value) || 1)),
     startMonth: ($('#fStart') as HTMLInputElement).value || UI.month,
     endMonth: ($('#fEnd') as HTMLInputElement).value || null,
-    accountId: ($('#fAcc') as HTMLSelectElement).value,
+    accountId: readAccount('fAcc', was?.accountId),
     method: ($('#fMethod') as HTMLSelectElement).value as Rule['method'],
     split: readSplit(), notes: ($('#fNotes') as HTMLInputElement).value.trim(),
     active: F.active !== false,
   };
-  if (id) {
-    const r = rule(id);
-    if (r) Object.assign(r, data);
+  if (was) {
+    Object.assign(was, data);
   } else {
     S.rules.push(Object.assign({ id: uid('rule_'), createdAt: new Date().toISOString() }, data));
   }
@@ -297,10 +322,10 @@ export function occurrenceModal(occId: string): void {
         <select class="input" id="oCur">${curOptions(o.currency)}</select>
       </div>
     </div>
-    <div class="two">
-      <div class="field"><label>Paid from</label><select class="input" id="oAcc">${accountOptions(o.accountId)}</select></div>
-      <div class="field"><label>Date</label><input class="input" id="oDate" type="date" value="${o.date}"></div>
-    </div>
+    ${twoUp(
+      accountField('Paid from', o.accountId, 'oAcc'),
+      `<div class="field"><label>Date</label><input class="input" id="oDate" type="date" value="${o.date}"></div>`,
+    )}
     <div class="field"><label>Skip it this month?</label>
       <div class="seg"><button type="button" data-act="occ-skip" data-v="0" class="${o.skipped ? '' : 'on'}">Counts</button>
       <button type="button" data-act="occ-skip" data-v="1" class="${o.skipped ? 'on' : ''}">Skipped</button></div>
@@ -324,7 +349,7 @@ export function saveOccurrence(occId: string): void {
   }
   ov.amount = r2(Number(($('#oAmount') as HTMLInputElement).value.replace(',', '.')) || 0);
   ov.currency = ($('#oCur') as HTMLSelectElement).value;
-  ov.accountId = ($('#oAcc') as HTMLSelectElement).value;
+  ov.accountId = readAccount('oAcc', ov.accountId || rule(ruleId)?.accountId);
   ov.date = ($('#oDate') as HTMLInputElement).value;
   ov.skipped = !!F.skip;
   closeModal(); commit(); toast('Updated for ' + monthLabel(period));
@@ -853,8 +878,11 @@ export function addChooser(): void {
     '<div class="item-main"><div class="name">One-off expense</div><div class="meta">groceries, dinner, the cleaner, a lamp</div></div></div>' +
     '<div class="item" data-act="new-rule"><div class="emo">🔁</div>' +
     '<div class="item-main"><div class="name">Recurring bill</div><div class="meta">monthly, quarterly or yearly, on repeat</div></div></div>' +
-    '<div class="item" data-act="new-settle"><div class="emo">🤝</div>' +
-    '<div class="item-main"><div class="name">Repayment</div><div class="meta">money one of you paid the other back</div></div></div></div>');
+    /* Nobody to pay back on a solo book, and the repayment form needs two
+       people to have a direction at all. */
+    (solo() ? '' : '<div class="item" data-act="new-settle"><div class="emo">🤝</div>' +
+      '<div class="item-main"><div class="name">Repayment</div><div class="meta">money one of you paid the other back</div></div></div>') +
+    '</div>');
 }
 
 /** Faces handed out in order as the onboarding list grows. */

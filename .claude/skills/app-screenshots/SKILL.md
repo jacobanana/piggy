@@ -29,6 +29,7 @@ node .claude/skills/app-screenshots/scripts/screenshot.mjs --seed --width phone 
 | Option | Meaning |
 | --- | --- |
 | `--seed` | Load a realistic book (two people, bills, extras, a trip, a repayment) into localStorage before the shot. Without it you photograph the onboarding screen. |
+| `--solo` | Seed the same book with one person on it, one account and nothing settled — the shape where Piggy hides every who-paid field. |
 | `--empty` | Explicitly photograph the onboarding screen. |
 | `--width phone\|tablet\|desktop\|<px>` | Repeatable. phone=390, tablet=768, desktop=1440. |
 | `--click <selector>` | Repeatable, in order — e.g. `--click '[data-act="settings"]'` to open a modal. |
@@ -56,6 +57,9 @@ node .claude/skills/app-screenshots/scripts/screenshot.mjs --seed --act rules --
 
 # The add-expense form
 node .claude/skills/app-screenshots/scripts/screenshot.mjs --seed --act add --act new-exp --name expense-form
+
+# The same form on a one-person book — no "paid from", no split, no repayments
+node .claude/skills/app-screenshots/scripts/screenshot.mjs --solo --act add --act new-exp --name expense-form-solo
 ```
 
 ## Troubleshooting
