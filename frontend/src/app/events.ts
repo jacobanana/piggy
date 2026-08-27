@@ -18,6 +18,7 @@ import {
 } from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
 import { disableLock, enableLock, refreshLockBody } from './lock';
+import { importCamt, openCamtPicker, toggleCamtGroup, toggleCamtRule } from './camtimport';
 import { applyTheme } from './theme';
 import { addMonths, fromCents, monthOf, thisMonth, todayISO, $ } from '../lib/utils';
 import { DEFAULT_RATES } from '../lib/constants';
@@ -235,6 +236,11 @@ export function wireEvents(): void {
       case 'export': exportJSON(); return;
       case 'export-csv': exportCSV(); return;
       case 'import': ($('#importFile') as HTMLInputElement).click(); return;
+      /* the bank-statement importer — parsed on this device, see camtimport.ts */
+      case 'camt-import': openCamtPicker(); return;
+      case 'camt-grp': toggleCamtGroup(id, el); return;
+      case 'camt-rule': toggleCamtRule(id, el); return;
+      case 'camt-go': importCamt(); return;
       /* The people only exist once onboarding runs, so this is the first
          moment the book's creator can be linked to one of them — the person
          built from their profile, or the question when it wasn't. */
