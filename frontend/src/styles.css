@@ -310,6 +310,16 @@ select.input{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg 
    first time it met the iOS copy. */
 body.pwa-suggest .fab{bottom:calc(20px + var(--safe-bottom) + var(--pwa-banner-h,0px) + 10px)}
 body.pwa-suggest{padding-bottom:calc(96px + var(--safe-bottom) + var(--pwa-banner-h,0px))}
+/* ---------- the fingerprint lock ---------- */
+/* Opaque and above everything — modals, toasts, the install card: while it is
+   up, whatever was on screen (or is still painting under it at boot) shows
+   nothing at all. */
+.lock-screen{position:fixed;inset:0;z-index:100;background:var(--paper);display:flex;align-items:center;justify-content:center;padding:calc(24px + var(--safe-top)) 24px calc(24px + var(--safe-bottom))}
+.lock-card{text-align:center;width:100%;max-width:300px}
+.lock-pig{font-size:56px;display:block;margin-bottom:10px}
+.lock-card h2{font-size:24px;margin-bottom:6px}
+.lock-card .sub{display:block;margin-bottom:22px;line-height:1.5}
+
 .center{text-align:center}
 .mono{font-family:var(--mono)}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
