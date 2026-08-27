@@ -6,6 +6,7 @@ import { avatar, commit } from './render';
 import { faceForName, myPersonId, onServer, profile, session, syncBookName } from './session';
 import { DEFAULT_FACE, updateProfile } from '../storage/api';
 import { repaintIfOwed } from './sync';
+import { lockSection } from './lock';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
 import { computeBalances, pairwiseDebt, settledItemIds, simplifyDebts } from '../domain/balances';
@@ -736,6 +737,7 @@ export function bookSettingsModal(): void {
       <button class="btn soft sm" data-act="add-cur">Add</button></div>
     <div class="hint">${S.settings.ratesUpdatedAt ? 'Rates updated ' + dayLabel2(S.settings.ratesUpdatedAt.slice(0, 10)) : 'Rates are editable estimates — set them to whatever your bank gave you.'}</div>
     <button class="btn primary wide" style="margin-top:16px" data-act="save-settings">Save settings</button>
+    ${onServer() ? '' : lockSection()}
     <div class="divider"></div>
     <div class="card-head"><h2>💾 ${onServer() ? 'This bank’s data' : 'Your data'}</h2></div>
     <div class="row-btns"><button class="btn soft" data-act="export">Export JSON</button>
@@ -766,7 +768,11 @@ export function accountSettingsModal(): void {
     '<div class="row-btns" style="margin-top:12px">' +
     '<button class="btn soft" data-act="banks">🏦 Your piggy banks</button>' +
     '<button class="btn soft" data-act="signout">Sign out</button></div>' +
-    '<div class="hint">Switching, inviting, leaving and deleting all live there.</div>');
+    '<div class="hint">Switching, inviting, leaving and deleting all live there.</div>' +
+    /* Device-side, not account-side — but this sheet is the "yours, not the
+       bank's" one, and that is the promise the lock makes too. On the Pages
+       build there is no such sheet, so the bank's own settings carry it. */
+    lockSection());
 }
 import { dayLabel as dayLabel2 } from '../lib/utils';
 export function saveSettings(): void {

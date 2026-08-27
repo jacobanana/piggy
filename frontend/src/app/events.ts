@@ -17,6 +17,7 @@ import {
   shareModal, switchTo,
 } from './books';
 import { exportCSV, exportJSON, fetchRates, importJSONFile } from './importexport';
+import { disableLock, enableLock, refreshLockBody } from './lock';
 import { importCamt, openCamtPicker, toggleCamtGroup, toggleCamtRule } from './camtimport';
 import { applyTheme } from './theme';
 import { addMonths, fromCents, monthOf, thisMonth, todayISO, $ } from '../lib/utils';
@@ -222,6 +223,15 @@ export function wireEvents(): void {
         S.settings.theme = v; applyTheme(v); save();
         $('#themePick')!.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
         return;
+      /* The fingerprint lock — device-side, so no save/commit: turning it on
+         runs the OS prompt right there, and only success stores anything. */
+      case 'lock-on':
+        void enableLock().then((ok) => {
+          refreshLockBody();
+          toast(ok ? 'Locked — Piggy will ask for you next time' : "Your device didn't set that up");
+        });
+        return;
+      case 'lock-off': disableLock(); refreshLockBody(); toast('App lock is off'); return;
       case 'fetch-rates': void fetchRates(); return;
       case 'export': exportJSON(); return;
       case 'export-csv': exportCSV(); return;

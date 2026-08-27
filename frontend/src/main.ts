@@ -4,6 +4,7 @@ import { enterBooks, setPendingJoin } from './app/books';
 import { wireEvents } from './app/events';
 import { gateError, leaveGate, splash } from './app/gate';
 import { fatal, hydrate } from './app/hydrate';
+import { initLock, lockGate } from './app/lock';
 import { sessionExpired, signInScreen } from './app/auth';
 import { toast } from './app/modals';
 import { initPwa } from './app/pwa';
@@ -31,6 +32,7 @@ window.addEventListener('piggy:sync', (e) => {
 window.addEventListener('piggy:signedout', () => sessionExpired());
 
 wireEvents();
+initLock();
 setState(blankState());
 
 /**
@@ -46,6 +48,10 @@ setState(blankState());
  * with nothing flashing in between.
  */
 async function boot(): Promise<void> {
+  /* The fingerprint first, before anything is painted or probed: the lock
+     screen is the whole point of the lock, and everything after it — the
+     splash, the sign-in gate, the book — is what it stands in front of. */
+  await lockGate();
   const splashTimer = setTimeout(() => splash('Warming up…'), 300);
   const [backend, local] = await Promise.all([
     detectBackend(),
