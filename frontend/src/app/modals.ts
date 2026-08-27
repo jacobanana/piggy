@@ -31,17 +31,28 @@ function clearF(): void { (Object.keys(F) as (keyof typeof F)[]).forEach((k) => 
 export function openModal(html: string, onMount?: () => void): void {
   const root = $('#modalRoot');
   if (!root) return;
+  if (modalCleanup) { modalCleanup(); modalCleanup = null; }   // the sheet being replaced
   root.innerHTML = '<div class="backdrop" data-act="backdrop"><div class="modal" data-stop>' +
     '<div class="grab"></div>' + html + '</div></div>';
   document.body.style.overflow = 'hidden';
   if (onMount) onMount();
 }
 
+/**
+ * A sheet's chance to drop state that must not outlive it — the statement
+ * importer parks a parsed bank file behind its sheet, and closing the sheet
+ * has to be the end of that data however the close happens (✕, backdrop,
+ * Escape, or another sheet opening over it).
+ */
+let modalCleanup: (() => void) | null = null;
+export function setModalCleanup(fn: () => void): void { modalCleanup = fn; }
+
 export function closeModal(): void {
   const root = $('#modalRoot');
   if (root) root.innerHTML = '';
   document.body.style.overflow = '';
   clearF();
+  if (modalCleanup) { modalCleanup(); modalCleanup = null; }
   repaintIfOwed();   // the sync poll may have landed while this was on top
 }
 
@@ -729,10 +740,12 @@ export function bookSettingsModal(): void {
     <div class="card-head"><h2>💾 ${onServer() ? 'This bank’s data' : 'Your data'}</h2></div>
     <div class="row-btns"><button class="btn soft" data-act="export">Export JSON</button>
       <button class="btn soft" data-act="import">Import JSON</button>
-      <button class="btn soft" data-act="export-csv">Export CSV</button></div>
+      <button class="btn soft" data-act="export-csv">Export CSV</button>
+      <button class="btn soft" data-act="camt-import">🏦 Bank statement</button></div>
     <div class="hint">${onServer()
       ? 'This book lives on the server, so it follows you to any device you sign in on. Import loads a Piggy export straight into it; export gives you the full, portable data model back.'
-      : 'Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.'}</div>
+      : 'Everything lives on this device only. Export gives you the full, portable data model — people, accounts, lists, bills, expenses, settlements.'}
+      Bank statement reads a camt.053 file from your e-banking on this device — nothing is uploaded — and sorts what it finds into recurring bills and one-offs for you to tick in.</div>
     <input type="file" id="importFile" accept="application/json" style="display:none">`);
 }
 
@@ -911,6 +924,9 @@ export function addChooser(): void {
        people to have a direction at all. */
     (solo() ? '' : '<div class="item" data-act="new-settle"><div class="emo">🤝</div>' +
       '<div class="item-main"><div class="name">Repayment</div><div class="meta">money one of you paid the other back</div></div></div>') +
+    '<div class="item" data-act="camt-import"><div class="emo">🏦</div>' +
+    '<div class="item-main"><div class="name">Import a bank statement</div>' +
+    '<div class="meta">camt.053 from e-banking · read on this device, never uploaded</div></div></div>' +
     '</div>');
 }
 
