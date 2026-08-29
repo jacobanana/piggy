@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, simplifyDebts, spendSummary } from './balances';
+import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from './balances';
 import { blankState } from '../model/state';
 import type { AppState, Expense, Settlement } from '../model/types';
 
@@ -117,6 +117,60 @@ describe('settlementsFor', () => {
     const s = fixture();
     s.settlements = [settlement({}), settlement({ id: 's2', ledgerId: 'trip' })];
     expect(settlementsFor(s, 'home').map((x) => x.id)).toEqual(['s1']);
+  });
+});
+
+describe('settlementsInMonth', () => {
+  it('files a repayment under the month of what it was ticked against', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04' })];
+    // handed over in July, but it covers August's grocery run
+    s.settlements = [settlement({ id: 's1', date: '2025-07-28', itemIds: ['e-aug'] })];
+    expect(settlementsInMonth(s, 'home', '2025-08').map((x) => x.id)).toEqual(['s1']);
+    expect(settlementsInMonth(s, 'home', '2025-07')).toEqual([]);
+  });
+
+  it('reads the month of a recurring bill straight off the item id', () => {
+    const s = fixture();
+    s.settlements = [settlement({ id: 's1', date: '2025-07-28', itemIds: ['rule-rent|2025-09'] })];
+    expect(settlementsInMonth(s, 'home', '2025-09').map((x) => x.id)).toEqual(['s1']);
+    expect(settlementsInMonth(s, 'home', '2025-07')).toEqual([]);
+  });
+
+  it('files a repayment with nothing ticked under the month it was made', () => {
+    const s = fixture();
+    s.settlements = [settlement({ id: 's1', date: '2025-07-28' })];
+    expect(settlementsInMonth(s, 'home', '2025-07').map((x) => x.id)).toEqual(['s1']);
+    expect(settlementsInMonth(s, 'home', '2025-08')).toEqual([]);
+  });
+
+  it('shows one repayment in every month it covers', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-jul', date: '2025-07-02' })];
+    s.settlements = [settlement({ id: 's1', date: '2025-07-28', itemIds: ['e-jul', 'rule-rent|2025-08'] })];
+    expect(settlementsInMonth(s, 'home', '2025-07').map((x) => x.id)).toEqual(['s1']);
+    expect(settlementsInMonth(s, 'home', '2025-08').map((x) => x.id)).toEqual(['s1']);
+  });
+
+  it('falls back to its own date once the items it named are gone', () => {
+    const s = fixture();
+    s.settlements = [settlement({ id: 's1', date: '2025-07-28', itemIds: ['e-deleted'] })];
+    expect(settlementsInMonth(s, 'home', '2025-07').map((x) => x.id)).toEqual(['s1']);
+  });
+
+  it('keeps a repayment dated in the future, filed under that month', () => {
+    const s = fixture();
+    s.settlements = [settlement({ id: 's1', date: '2099-01-05' })];
+    expect(settlementsInMonth(s, 'home', '2099-01').map((x) => x.id)).toEqual(['s1']);
+  });
+
+  it('gives a trip the whole log, newest first', () => {
+    const s = fixture();
+    s.settlements = [
+      settlement({ id: 's-jul', date: '2025-07-28' }),
+      settlement({ id: 's-aug', date: '2025-08-15', itemIds: ['rule-rent|2025-09'] }),
+    ];
+    expect(settlementsInMonth(s, 'home', null).map((x) => x.id)).toEqual(['s-aug', 's-jul']);
   });
 });
 

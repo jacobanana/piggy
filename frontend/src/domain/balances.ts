@@ -4,9 +4,10 @@
  * Expenses belong to a month; the tally never does. Somebody paying on the
  * 28th of July for August's rent is settling a real debt, and a tally that
  * reset every month would either lose that money or count it twice. So the
- * balance, what each side has paid, and the repayment log all run from the
- * first entry to the last — only `categoryTotals` below, which describes one
- * month's spending rather than the debt between people, takes a month.
+ * balance and what each side has paid run from the first entry to the last.
+ * Only what describes one month rather than the debt between people takes a
+ * month: `categoryTotals`, and `settlementsInMonth`, which files a repayment
+ * under the month of whatever it was ticked against.
  */
 import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types';
 import { itemsInScope } from './selectors';
@@ -118,6 +119,46 @@ export function settlementsFor(s: AppState, ledgerId: string): Settlement[] {
     .sort((a, b) => (a.date === b.date
       ? (b.createdAt || '').localeCompare(a.createdAt || '')
       : a.date < b.date ? 1 : -1));
+}
+
+/**
+ * Which month a ticked item belongs to. A recurring occurrence carries its
+ * period in the id itself (`ruleId|YYYY-MM`); an ad-hoc expense is dated.
+ * Null when the id names nothing that still exists.
+ */
+function itemMonth(s: AppState, id: string): MonthKey | null {
+  if (id.includes('|')) return id.split('|')[1] || null;
+  const e = s.expenses.find((x) => x.id === id);
+  return e ? monthOf(e.date) : null;
+}
+
+/**
+ * The month (or months) a repayment belongs to for the log.
+ *
+ * Ticking what a repayment covers says which month's money it is, whatever
+ * day it was handed over: paying in July for August's rent belongs to August.
+ * With nothing ticked there is only the date to go on, so it belongs to the
+ * month the money moved — and that is the fallback too when everything it was
+ * logged against has since been deleted.
+ */
+export function settlementMonths(s: AppState, x: Pick<Settlement, 'date'> & { itemIds?: string[] }): MonthKey[] {
+  const out: MonthKey[] = [];
+  (x.itemIds || []).forEach((id) => {
+    const m = itemMonth(s, id);
+    if (m && !out.includes(m)) out.push(m);
+  });
+  return out.length ? out.sort() : [monthOf(x.date)];
+}
+
+/**
+ * The repayments one month should show, newest first: those ticked against
+ * something that falls in the month, plus those with nothing ticked that were
+ * made during it. A null month (a trip) means the whole log.
+ */
+export function settlementsInMonth(s: AppState, ledgerId: string, monthKey: MonthKey | null): Settlement[] {
+  const all = settlementsFor(s, ledgerId);
+  if (!monthKey) return all;
+  return all.filter((x) => settlementMonths(s, x).includes(monthKey));
 }
 
 /**
