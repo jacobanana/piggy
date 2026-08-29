@@ -114,11 +114,10 @@ export function receiptCard(l: Ledger): string {
   const bal = computeBalances(S, l.id);
   const paid = paidByTotals(S, l.id);
   const debts = simplifyDebts(bal);
-  const rows = S.people.map((p) => {
-    const b = bal[p.id] || 0;
-    return '<div class="rrow"><span>' + esc(p.emoji) + ' ' + esc(p.name) + '</span><span class="dots"></span>' +
-      '<span class="val ' + (b > 1 ? 'pos' : b < -1 ? 'neg' : '') + '">' + (b > 1 ? '+' : '') + fromCents(b).toFixed(2) + '</span></div>';
-  }).join('');
+  /* No per-person +/- line here. It read as a second, contradictory answer to
+     the one question the tally exists for — "Léa -1153.78 / Marc +1153.78"
+     above "Léa owes Marc 1153.78" is the same fact three times, in a sign
+     convention you have to stop and decode. The debt line below says it. */
   const paidRows = S.people.map((p) => '<div class="rrow" style="color:var(--ink-soft)"><span>paid by ' + esc(p.name) + '</span><span class="dots"></span><span>' + fromCents(paid[p.id] || 0).toFixed(2) + '</span></div>').join('');
   const settled = settlementsFor(S, l.id);
   const back: Record<string, number> = {};
@@ -139,7 +138,7 @@ export function receiptCard(l: Ledger): string {
   return '<div class="receipt" style="padding-top:22px">' +
     '<div class="receipt-title">the tally · ' + esc(baseCur()) + '</div>' +
     (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">Every month together, whenever the money moved</div>') +
-    rows + '<div class="tear"></div>' + paidRows + backRows + '<div class="tear"></div>' + body +
+    paidRows + backRows + '<div class="tear"></div>' + body +
     (debts.length ? '<button class="btn mint wide" style="margin-top:14px" data-act="settle">Settle up 🤝</button>' : '') +
     '</div>';
 }
