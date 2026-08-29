@@ -5,7 +5,7 @@ import { COLORS } from './theme';
 import { onServer, profile } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, cents, dayLabel, esc, fromCents, money, monthLabel, monthOf, thisMonth } from '../lib/utils';
-import { computeBalances, categoryTotals, paidByTotals, settlementsFor, simplifyDebts, spendSummary } from '../domain/balances';
+import { computeBalances, categoryTotals, paidByTotals, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from '../domain/balances';
 import { occurrencesFor, plannedInScope, plannedShares, upcomingRules } from '../domain/selectors';
 
 export function commit(): void { save(); render(); }
@@ -114,11 +114,10 @@ export function receiptCard(l: Ledger): string {
   const bal = computeBalances(S, l.id);
   const paid = paidByTotals(S, l.id);
   const debts = simplifyDebts(bal);
-  const rows = S.people.map((p) => {
-    const b = bal[p.id] || 0;
-    return '<div class="rrow"><span>' + esc(p.emoji) + ' ' + esc(p.name) + '</span><span class="dots"></span>' +
-      '<span class="val ' + (b > 1 ? 'pos' : b < -1 ? 'neg' : '') + '">' + (b > 1 ? '+' : '') + fromCents(b).toFixed(2) + '</span></div>';
-  }).join('');
+  /* No per-person +/- line here. It read as a second, contradictory answer to
+     the one question the tally exists for — "Léa -1153.78 / Marc +1153.78"
+     above "Léa owes Marc 1153.78" is the same fact three times, in a sign
+     convention you have to stop and decode. The debt line below says it. */
   const paidRows = S.people.map((p) => '<div class="rrow" style="color:var(--ink-soft)"><span>paid by ' + esc(p.name) + '</span><span class="dots"></span><span>' + fromCents(paid[p.id] || 0).toFixed(2) + '</span></div>').join('');
   const settled = settlementsFor(S, l.id);
   const back: Record<string, number> = {};
@@ -139,7 +138,7 @@ export function receiptCard(l: Ledger): string {
   return '<div class="receipt" style="padding-top:22px">' +
     '<div class="receipt-title">the tally · ' + esc(baseCur()) + '</div>' +
     (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">Every month together, whenever the money moved</div>') +
-    rows + '<div class="tear"></div>' + paidRows + backRows + '<div class="tear"></div>' + body +
+    paidRows + backRows + '<div class="tear"></div>' + body +
     (debts.length ? '<button class="btn mint wide" style="margin-top:14px" data-act="settle">Settle up 🤝</button>' : '') +
     '</div>';
 }
@@ -237,11 +236,13 @@ function repaymentRow(s: Settlement): string {
 }
 
 /**
- * The one repayment log for the ledger. Grouped by the month the money moved
- * — which is when it happened, not which month's expenses it was for.
+ * The repayment log. A month shows the repayments filed under it — whatever
+ * was ticked against one of that month's items, plus anything logged that
+ * month with nothing ticked. A trip has no months, so it shows the lot,
+ * grouped by the month the money moved.
  */
-function repaymentsCard(l: Ledger): string {
-  const list = settlementsFor(S, l.id);
+function repaymentsCard(l: Ledger, mk: MonthKey | null): string {
+  const list = settlementsInMonth(S, l.id, mk);
   const moved = list.reduce((sum, s) => sum + cents(toBase(s.amount, s.currency, s.fxRate)), 0);
   const perPair: Record<string, number> = {};
   list.forEach((s) => {
@@ -253,16 +254,21 @@ function repaymentsCard(l: Ledger): string {
     return '<div class="rrow"><span>' + esc(person(f)?.name || '?') + ' → ' + esc(person(t)?.name || '?') +
       '</span><span class="dots"></span><span class="val">' + fromCents(c).toFixed(2) + '</span></div>';
   }).join('');
+  /* One month is one list; a trip spans months, so it keeps its headings. */
   const months: MonthKey[] = [];
-  list.forEach((s) => { const m = monthOf(s.date); if (!months.includes(m)) months.push(m); });
-  const rows = months.map((m) =>
-    (months.length > 1 ? '<div class="daygroup">' + monthLabel(m) + '</div>' : '') +
-    '<div class="list">' + list.filter((s) => monthOf(s.date) === m).map(repaymentRow).join('') + '</div>').join('');
+  if (!mk) list.forEach((s) => { const m = monthOf(s.date); if (!months.includes(m)) months.push(m); });
+  const rows = mk
+    ? '<div class="list">' + list.map(repaymentRow).join('') + '</div>'
+    : months.map((m) =>
+      (months.length > 1 ? '<div class="daygroup">' + monthLabel(m) + '</div>' : '') +
+      '<div class="list">' + list.filter((s) => monthOf(s.date) === m).map(repaymentRow).join('') + '</div>').join('');
   return '<div class="card"><div class="card-head"><h2>🤝 Repayments</h2>' +
     '<span class="sub">' + (list.length ? list.length + ' · ' + money(fromCents(moved), baseCur()) + ' moved' : 'none yet') + '</span></div>' +
     (list.length
       ? rows + (Object.keys(perPair).length > 1 ? '<div class="divider"></div>' + summary : '')
-      : '<div class="empty"><span class="big">💸</span>No money has moved yet.<br>The tally above says who should pay whom.</div>') +
+      : '<div class="empty"><span class="big">💸</span>' +
+        (mk ? 'Nothing repaid for ' + esc(monthLabel(mk)) + '.<br>The tally above runs across every month.'
+          : 'No money has moved yet.<br>The tally above says who should pay whom.') + '</div>') +
     '<button class="btn soft wide" style="margin-top:12px" data-act="new-settle">＋ Log a repayment</button></div>';
 }
 
@@ -359,7 +365,7 @@ function householdView(l: Ledger): string {
     '</div>';
 
   out += plannedCard(l, mk);
-  if (!solo()) out += repaymentsCard(l);
+  if (!solo()) out += repaymentsCard(l, mk);
   out += catCard(l.id, mk);
 
   if (soon.length) {
@@ -417,7 +423,7 @@ function tripView(l: Ledger): string {
       ).join('') + '</div>';
   }
   out += plannedCard(l, null);
-  if (!solo()) out += repaymentsCard(l);
+  if (!solo()) out += repaymentsCard(l, null);
   if (items.length) out += catCard(l.id, null);
   return out;
 }

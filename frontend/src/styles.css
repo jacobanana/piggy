@@ -125,8 +125,6 @@ body.gate .topbar-in .icon-btn,body.gate .ledger-bar,body.gate .fab{display:none
 .rrow{display:flex;align-items:baseline;gap:8px;font-family:var(--mono);font-size:13px;padding:5px 0}
 .rrow .dots{flex:1;border-bottom:2px dotted var(--line);transform:translateY(-3px)}
 .rrow .val{font-weight:700}
-.pos{color:var(--mint)}
-.neg{color:var(--accent)}
 .debt{display:flex;align-items:center;gap:10px;padding:12px;border:2px dashed var(--line);border-radius:14px;margin-top:10px;background:var(--tint2)}
 .debt .amt{margin-left:auto;font-family:var(--mono);font-weight:700;font-size:16px}
 .arrow{font-size:18px;color:var(--ink-soft)}

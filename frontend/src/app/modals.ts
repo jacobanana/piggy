@@ -9,7 +9,7 @@ import { repaintIfOwed } from './sync';
 import { lockSection } from './lock';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, pairwiseDebt, settledItemIds, simplifyDebts } from '../domain/balances';
+import { computeBalances, pairwiseDebt, settledItemIds, settlementMonths, simplifyDebts } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
 import { defaultAccountId, itemsInScope, overrideOf } from '../domain/selectors';
 
@@ -551,7 +551,6 @@ export function refreshPickBox(): void {
 }
 
 export function settlementForm(st?: Settlement | null, prefill?: { from?: string; to?: string; amount?: number | null; method?: string }): void {
-  const l = activeLedger()!;
   const isNew = !st;
   const pre = prefill || {};
   const other = (id?: string) => (S.people.find((p) => p.id !== id) || S.people[0] || {}).id;
@@ -560,7 +559,10 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
     toPersonId: pre.to || other(pre.from || (S.people[0] || {}).id),
     amount: pre.amount != null ? pre.amount : undefined,
     currency: baseCur(), fxRate: null, method: pre.method || lastPayMethod(),
-    date: l.kind === 'trip' ? clampToTrip(l) : defaultDate(), note: '',
+    /* Always today, whatever month is on screen and whatever dates the trip
+       runs between: a repayment is dated when the money moved. Which month it
+       is filed under comes from what it's ticked against, not from this. */
+    date: todayISO(), note: '',
   };
   F.method = x.method || lastPayMethod();
   F.settleId = st ? st.id : undefined;
@@ -582,7 +584,9 @@ export function settlementForm(st?: Settlement | null, prefill?: { from?: string
     ${moneyFields(x.amount, x.currency!, x.fxRate)}
     <div class="hint" id="pickHint" style="display:none;margin:-6px 0 13px"></div>
     <div class="field"><label>How it travelled</label>${payMethodChips(F.method!)}</div>
-    <div class="field"><label>When</label><input class="input" id="sDate" type="date" value="${x.date}"></div>
+    <div class="field"><label>When</label><input class="input" id="sDate" type="date" value="${x.date}">
+      <div class="hint">Today unless you say otherwise. A date in the future is fine — a transfer already sent that lands next week.</div>
+    </div>
     <div class="field"><label>Note (optional)</label><input class="input" id="sNote" value="${esc(x.note || '')}" placeholder="Cash at the station"></div>
     <div class="row-btns">
       <button class="btn primary" style="flex:1" data-act="save-settle" data-id="${x.id || ''}">${isNew ? 'Log it 🤝' : 'Save changes'}</button>
@@ -619,7 +623,10 @@ export function saveSettlement(id?: string): void {
   } else {
     S.settlements.push(Object.assign({ id: uid('set_'), createdAt: new Date().toISOString() }, data));
   }
-  if (!id && l.kind !== 'trip' && monthOf(data.date) !== UI.month) UI.month = monthOf(data.date);
+  /* Land on a month that will actually show it: what it was ticked against
+     decides that, and only its own date when nothing was. */
+  const months = settlementMonths(S, data);
+  if (!id && l.kind !== 'trip' && !months.includes(UI.month)) UI.month = months[0];
   closeModal(); commit(); toast(id ? 'Saved' : 'Repayment logged 🤝');
 }
 
