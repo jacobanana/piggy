@@ -5,7 +5,7 @@ import {
   F, accountForm, accountSettingsModal, addChooser, bookSettingsModal, closeModal, doSettle, expenseForm,
   ledgerForm, occurrenceModal, onboard, personForm, profileForm, refreshPickBox, refreshSplit, ruleForm,
   rulesModal, saveAccount, saveExpense, saveLedger, saveOccurrence, savePerson, saveProfile, saveRule,
-  saveSettings, saveSettlement, settingsModal, settleModal, settlementForm, syncPickedAmount, toast,
+  saveSettings, saveSettlement, settingsModal, settleModal, settlementForm, syncPickedAmount, tallyModal, toast,
 } from './modals';
 import {
   authEnter, backToEmail, backToSignIn, doSignOut, sendCode, startJoin, startSignUp,
@@ -151,6 +151,10 @@ export function wireEvents(): void {
         closeModal(); commit(); return;
       }
       case 'settle': settleModal(); return;
+      /* The tally opened up. The chips reopen the same sheet at the other
+         scope — one sheet, two scopes, rather than two sheets to keep alike. */
+      case 'tally': tallyModal(); return;
+      case 'tally-scope': tallyModal(v); return;
       case 'do-settle': doSettle(el.dataset.from!, el.dataset.to!, el.dataset.c!); return;
       case 'new-settle':
         settlementForm(null, {

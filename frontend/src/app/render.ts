@@ -177,7 +177,8 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
     (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">' +
       (t ? 'This month on its own, then the running total' : 'Every month together, whenever the money moved') + '</div>') +
     paidRows + backRows + (paidRows || backRows ? '<div class="tear"></div>' : '') + body + running +
-    (debts.length ? '<button class="btn mint wide" style="margin-top:14px" data-act="settle">Settle up 🤝</button>' : '') +
+    '<button class="today-link" style="margin:14px 0 0;width:100%" data-act="tally">see who paid what ›</button>' +
+    (debts.length ? '<button class="btn mint wide" style="margin-top:8px" data-act="settle">Settle up 🤝</button>' : '') +
     '</div>';
 }
 

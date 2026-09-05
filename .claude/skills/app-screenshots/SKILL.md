@@ -32,6 +32,7 @@ node .claude/skills/app-screenshots/scripts/screenshot.mjs --seed --width phone 
 | `--solo` | Seed the same book with one person on it, one account and nothing settled — the shape where Piggy hides every who-paid field. |
 | `--empty` | Explicitly photograph the onboarding screen. |
 | `--width phone\|tablet\|desktop\|<px>` | Repeatable. phone=390, tablet=768, desktop=1440. |
+| `--height <px>` | Viewport height for every width. A modal is its own scroller, so this — not `--full-page` — is how you get a long sheet in one shot. |
 | `--click <selector>` | Repeatable, in order — e.g. `--click '[data-act="settings"]'` to open a modal. |
 | `--act <data-act>` | Shorthand for `--click '[data-act="..."]'`. |
 | `--full-page` | Capture the whole scroll height. |

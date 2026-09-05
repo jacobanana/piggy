@@ -38,6 +38,30 @@ function paidShares(s: AppState, it: LedgerItem, ids: string[]): Record<string, 
 }
 
 /**
+ * The same, in whole cents: what each person's column says they paid for this
+ * one item. The last owner of an account absorbs the rounding, which is the
+ * rule the splits already follow, so a row's cells always add up to the row.
+ */
+function paidCents(s: AppState, it: LedgerItem, ids: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  ids.forEach((id) => { out[id] = 0; });
+  const acc = s.accounts.find((a) => a.id === it.accountId);
+  if (!acc) return out;
+  const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
+  const owners = Object.keys(acc.ownership).filter((id) => out[id] != null);
+  const held = owners.reduce((a, id) => a + Number(acc.ownership[id]), 0);
+  let done = 0;
+  owners.forEach((id, i) => {
+    const c = i === owners.length - 1
+      ? Math.round(tc * held) - done
+      : Math.round(tc * Number(acc.ownership[id]));
+    out[id] = c;
+    done += c;
+  });
+  return out;
+}
+
+/**
  * What one item alone does to each person's balance, in base-currency cents:
  * what they paid for it, less the share of it that was theirs. Unrounded, as
  * `paidShares` is.
@@ -316,6 +340,171 @@ export function monthTally(s: AppState, ledgerId: string, monthKey: MonthKey): M
 /** Whether a month moved any money at all — spent, or handed back. */
 export function monthMoved(t: MonthTally): boolean {
   return Object.keys(t.paid).some((id) => t.paid[id] !== 0 || t.back[id] !== 0);
+}
+
+/** One person's column of the breakdown, in base-currency cents. */
+export interface PersonSplit {
+  id: string;
+  /** Paid out of their accounts for the recurring bills in scope. */
+  recurring: number;
+  /** …and for the one-off expenses. */
+  oneOff: number;
+  /** The two together — everything their money covered. */
+  paid: number;
+  /** What the splits made theirs. Derived from the rest of the row, so the
+      figures on screen always add up and still land on the tally's own net. */
+  share: number;
+  /** Repayments they handed over, and were handed, counting in this scope. */
+  out: number;
+  in: number;
+  /** Where that leaves them. Positive: they are owed. Straight off the tally. */
+  net: number;
+}
+
+/**
+ * Everything behind one tally figure: the bills, the extras, the repayments,
+ * and what each of them did to each person.
+ *
+ * The tally says who owes whom; this says why. It is the same money the tally
+ * counts and no other — planned entries stay out, as they do everywhere — cut
+ * into the three groups the money actually falls into, because "who paid what"
+ * is a different question for a bill that repeats than for a Tuesday's
+ * groceries, and different again for money handed straight over.
+ */
+export interface TallyBreakdown {
+  /** The month it covers, or null for the whole ledger. */
+  month: MonthKey | null;
+  /** Every entry in scope, newest first, split by where it came from. */
+  recurring: LedgerItem[];
+  oneOff: LedgerItem[];
+  repayments: Settlement[];
+  /**
+   * How much of each repayment counts in this scope, by id. A repayment
+   * ticked across two months shows in both and counts part in each, so the
+   * row can say what it is worth here rather than quietly meaning less.
+   */
+  counted: Record<string, number>;
+  /**
+   * What each person's accounts put into each entry, by item id then person —
+   * one cell of the table. Whole cents, so a row adds up to the row and a
+   * column adds up to the column with nothing rounded away in between.
+   */
+  paidPerItem: Record<string, Record<string, number>>;
+  /** One row per person, in the book's own order. */
+  people: PersonSplit[];
+  /** What each group came to, all people together. */
+  totals: { recurring: number; oneOff: number; repaid: number };
+}
+
+export function tallyBreakdown(s: AppState, ledgerId: string, monthKey: MonthKey | null): TallyBreakdown {
+  const ids = s.people.map((p) => p.id);
+  const base = (it: { amount: number; currency: string; fxRate: number | null }): number =>
+    cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
+  /* Newest first in both lists, whichever scope: what you just entered is
+     what you came to check. */
+  const byDate = (a: LedgerItem, b: LedgerItem): number => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1);
+  const items = itemsInScope(s, ledgerId, monthKey);
+  const recurring = items.filter((it) => it.kind === 'recurring').sort(byDate);
+  const oneOff = items.filter((it) => it.kind === 'adhoc').sort(byDate);
+
+  const repayments = settlementsInMonth(s, ledgerId, monthKey);
+  const byId = new Map(repayableItems(s, ledgerId).map((it) => [it.id, it]));
+  const counted: Record<string, number> = {};
+  repayments.forEach((x) => {
+    counted[x.id] = monthKey ? (settlementByMonth(s, x, byId)[monthKey] || 0) : base(x);
+  });
+
+  const zero = (): Record<string, number> => {
+    const o: Record<string, number> = {};
+    ids.forEach((id) => { o[id] = 0; });
+    return o;
+  };
+  const rec = zero(), one = zero(), out = zero(), inn = zero();
+  const paidPerItem: Record<string, Record<string, number>> = {};
+  recurring.forEach((it) => {
+    paidPerItem[it.id] = paidCents(s, it, ids);
+    Object.entries(paidPerItem[it.id]).forEach(([pid, c]) => { rec[pid] += c; });
+  });
+  oneOff.forEach((it) => {
+    paidPerItem[it.id] = paidCents(s, it, ids);
+    Object.entries(paidPerItem[it.id]).forEach(([pid, c]) => { one[pid] += c; });
+  });
+  repayments.forEach((x) => {
+    const c = counted[x.id] || 0;
+    if (out[x.fromPersonId] != null) out[x.fromPersonId] += c;
+    if (inn[x.toPersonId] != null) inn[x.toPersonId] += c;
+  });
+
+  /* The net is the tally's own, never recomputed here: a breakdown that
+     disagreed with the figure it explains would be worse than none. What each
+     person's share came to is then read back off the row, which is also where
+     the half-cent a joint account leaves behind ends up. */
+  const net = monthKey ? monthTally(s, ledgerId, monthKey).balances : computeBalances(s, ledgerId);
+  const people: PersonSplit[] = ids.map((id) => {
+    const r = rec[id], o = one[id];
+    const n = net[id] || 0;
+    return {
+      id, recurring: r, oneOff: o, paid: r + o, out: out[id], in: inn[id],
+      share: r + o + out[id] - inn[id] - n, net: n,
+    };
+  });
+
+  return {
+    month: monthKey, recurring, oneOff, repayments, counted, paidPerItem, people,
+    totals: {
+      recurring: recurring.reduce((sum, it) => sum + base(it), 0),
+      oneOff: oneOff.reduce((sum, it) => sum + base(it), 0),
+      repaid: repayments.reduce((sum, x) => sum + (counted[x.id] || 0), 0),
+    },
+  };
+}
+
+/** Every occurrence of one bill, added up. */
+export interface RuleRoll {
+  ruleId: string;
+  name: string;
+  emoji: string;
+  accountId: string;
+  /** How many times it landed in the scope, and what they came to. */
+  count: number;
+  cents: number;
+  /** Of that, what each person's accounts put in. */
+  paid: Record<string, number>;
+  /** The first and last month it landed in. */
+  from: MonthKey;
+  to: MonthKey;
+}
+
+/**
+ * Recurring occurrences rolled up per bill, biggest first.
+ *
+ * Over one month a bill is one line and belongs in the list with everything
+ * else. Over a year and a half it is eighteen identical lines you scroll past
+ * to reach the answer — so at that scope the breakdown says "Rent, twenty
+ * times, 37,000" instead, which is what anyone reading a whole-ledger total
+ * came for anyway.
+ */
+export function rollUpRecurring(s: AppState, items: LedgerItem[]): RuleRoll[] {
+  const ids = s.people.map((p) => p.id);
+  const out = new Map<string, RuleRoll>();
+  items.forEach((it) => {
+    if (it.kind !== 'recurring') return;
+    const ruleId = it.id.split('|')[0];
+    const at = it.period;
+    const paid: Record<string, number> = {};
+    ids.forEach((id) => { paid[id] = 0; });
+    const r = out.get(ruleId) || {
+      ruleId, name: it.name, emoji: it.emoji, accountId: it.accountId,
+      count: 0, cents: 0, paid, from: at, to: at,
+    };
+    r.count += 1;
+    r.cents += cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
+    Object.entries(paidCents(s, it, ids)).forEach(([pid, c]) => { r.paid[pid] += c; });
+    if (monthIndex(at) < monthIndex(r.from)) r.from = at;
+    if (monthIndex(at) > monthIndex(r.to)) r.to = at;
+    out.set(ruleId, r);
+  });
+  return [...out.values()].sort((a, b) => b.cents - a.cents);
 }
 
 /** One item a repayment can be logged against, and where it stands. */
