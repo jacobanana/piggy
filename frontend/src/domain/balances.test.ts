@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, settledItemIds, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from './balances';
+import { computeBalances, pairwiseDebt, repaymentPicks, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from './balances';
+import type { RepayPick } from './balances';
+import { REPAY_AHEAD } from './selectors';
 import { blankState } from '../model/state';
-import type { AppState, Expense, Settlement } from '../model/types';
+import { addMonths, thisMonth } from '../lib/utils';
+import type { AppState, Expense, Rule, Settlement } from '../model/types';
 
 /** Two people, personal accounts, and a 50/50 joint account. */
 function fixture(): AppState {
@@ -27,6 +30,14 @@ const expense = (over: Partial<Expense>): Expense => ({
   fxRate: 1, date: '2025-03-10', accountId: 'acc-lea', method: 'card', planned: false,
   split: { mode: 'equal', participants: [], values: {} }, notes: '', createdAt: '2025-03-10T00:00:00Z',
   ...over,
+});
+
+/** A monthly bill Léa's account pays, split evenly. */
+const rentRule = (): Rule => ({
+  id: 'rule-rent', ledgerId: 'home', name: 'Rent', emoji: '🏠', amount: 1200, currency: 'CHF',
+  frequency: 'monthly', dueDay: 1, startMonth: '2025-01', endMonth: null, accountId: 'acc-lea',
+  method: 'transfer', split: { mode: 'equal', participants: [], values: {} }, active: true,
+  notes: '', createdAt: '2025-01-01T00:00:00Z',
 });
 
 /** Marc handing Léa 50 — exactly half of the fixture's 100 expense. */
@@ -174,32 +185,128 @@ describe('settlementsInMonth', () => {
   });
 });
 
-describe('settledItemIds', () => {
-  it('gathers the items every repayment in the ledger was logged against', () => {
+describe('repaymentPicks', () => {
+  /** Léa pays 100 for the pair of them, so Marc owes her 50. */
+  const owing = (): AppState => {
     const s = fixture();
-    s.settlements = [
-      settlement({ id: 's1', itemIds: ['e1', 'rule-rent|2025-03'] }),
-      settlement({ id: 's2', itemIds: ['e2'] }),
-    ];
-    expect([...settledItemIds(s, 'home')].sort()).toEqual(['e1', 'e2', 'rule-rent|2025-03']);
+    s.expenses = [expense({})];
+    return s;
+  };
+  const pick = (picks: RepayPick[], id: string): RepayPick =>
+    picks.find((c) => c.it.id === id) as RepayPick;
+  const owed = (s: AppState, id: string, from = 'marc', to = 'lea'): RepayPick =>
+    pick(repaymentPicks(s, 'home', from, to), id);
+
+  it('offers what one owes the other, and nothing the other way round', () => {
+    const s = owing();
+    expect(owed(s, 'e1').left).toBe(5000);
+    expect(owed(s, 'e1', 'lea', 'marc').left).toBe(0);
   });
 
-  it('leaves the repayment being edited out, so its own items stay pickable', () => {
+  it('leaves the rest of an item due after a part payment', () => {
+    const s = owing();
+    s.settlements = [settlement({ amount: 20, itemIds: ['e1'] })];
+    expect(owed(s, 'e1').repaid).toBe(2000);
+    expect(owed(s, 'e1').left).toBe(3000);
+  });
+
+  it('takes an item off the table once it is paid in full', () => {
+    const s = owing();
+    s.settlements = [settlement({ amount: 50, itemIds: ['e1'] })];
+    expect(owed(s, 'e1').left).toBe(0);
+  });
+
+  it('adds part payments up until nothing is left', () => {
+    const s = owing();
+    s.settlements = [
+      settlement({ id: 's1', amount: 20, itemIds: ['e1'] }),
+      settlement({ id: 's2', amount: 30, itemIds: ['e1'] }),
+    ];
+    expect(owed(s, 'e1').left).toBe(0);
+  });
+
+  it('spreads short money over the ticked items in proportion', () => {
     const s = fixture();
-    s.settlements = [settlement({ id: 's1', itemIds: ['e1'] }), settlement({ id: 's2', itemIds: ['e2'] })];
-    expect([...settledItemIds(s, 'home', 's1')]).toEqual(['e2']);
+    s.expenses = [expense({}), expense({ id: 'e2', amount: 300 })];   // 50 and 150 owed
+    s.settlements = [settlement({ amount: 100, itemIds: ['e1', 'e2'] })];
+    expect(owed(s, 'e1').left).toBe(2500);
+    expect(owed(s, 'e2').left).toBe(7500);
+  });
+
+  it('gives the leftover cent to the biggest of the ticked items', () => {
+    const s = fixture();
+    s.expenses = [expense({ amount: 2 }), expense({ id: 'e2', amount: 4 })];   // 100 and 200 owed
+    s.settlements = [settlement({ amount: 1, itemIds: ['e1', 'e2'] })];        // 100 of 300
+    expect(owed(s, 'e1').repaid).toBe(33);
+    expect(owed(s, 'e2').repaid).toBe(67);
+  });
+
+  it('never spills an overpayment onto anything that was not ticked', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', amount: 300 })];
+    s.settlements = [settlement({ amount: 200, itemIds: ['e1'] })];   // far over the 50 owed
+    expect(owed(s, 'e1').left).toBe(0);
+    expect(owed(s, 'e2').left).toBe(15000);
+  });
+
+  it('leaves an item alone when the money went the other way', () => {
+    const s = owing();
+    s.settlements = [settlement({ fromPersonId: 'lea', toPersonId: 'marc', amount: 20, itemIds: ['e1'] })];
+    expect(owed(s, 'e1').left).toBe(5000);
   });
 
   it('ignores repayments belonging to another ledger', () => {
-    const s = fixture();
-    s.settlements = [settlement({ ledgerId: 'trip', itemIds: ['e1'] })];
-    expect([...settledItemIds(s, 'home')]).toEqual([]);
+    const s = owing();
+    s.settlements = [settlement({ ledgerId: 'trip', amount: 20, itemIds: ['e1'] })];
+    expect(owed(s, 'e1').left).toBe(5000);
   });
 
-  it('is empty when nothing was ticked', () => {
+  it('puts the repayment being edited back on the table', () => {
+    const s = owing();
+    s.settlements = [settlement({ id: 's1', amount: 20, itemIds: ['e1'] })];
+    expect(pick(repaymentPicks(s, 'home', 'marc', 'lea', 's1'), 'e1').left).toBe(5000);
+  });
+
+  it('counts a foreign repayment through its snapshotted rate', () => {
+    const s = owing();
+    s.settlements = [settlement({ amount: 20, currency: 'EUR', fxRate: 0.9, itemIds: ['e1'] })];
+    expect(owed(s, 'e1').repaid).toBe(1800);
+  });
+
+  it('offers a planned expense, flagged as money that has not moved', () => {
     const s = fixture();
-    s.settlements = [settlement({})];
-    expect([...settledItemIds(s, 'home')]).toEqual([]);
+    s.expenses = [expense({ planned: true })];
+    expect(owed(s, 'e1').left).toBe(5000);
+    expect(owed(s, 'e1').ahead).toBe(true);
+    expect(computeBalances(s, 'home').marc).toBe(0);   // and still out of the tally
+  });
+
+  it('offers the bills still to land, and only those are flagged', () => {
+    const s = fixture();
+    s.rules = [rentRule()];
+    expect(owed(s, 'rule-rent|' + addMonths(thisMonth(), 1)).left).toBe(60000);
+    expect(owed(s, 'rule-rent|' + addMonths(thisMonth(), 1)).ahead).toBe(true);
+    expect(owed(s, 'rule-rent|' + thisMonth()).ahead).toBe(false);
+  });
+
+  it('puts what is paid first, newest first, and what is not last, soonest first', () => {
+    const s = fixture();
+    s.rules = [rentRule()];
+    s.expenses = [expense({ id: 'old', date: '2025-02-01' }), expense({ id: 'new', date: '2025-04-01' })];
+    const picks = repaymentPicks(s, 'home', 'marc', 'lea');
+    const landed = picks.filter((c) => !c.ahead);
+    const ahead = picks.filter((c) => c.ahead);
+    expect(picks.slice(0, landed.length).every((c) => !c.ahead)).toBe(true);
+    expect(landed.map((c) => c.it.date)).toEqual([...landed.map((c) => c.it.date)].sort().reverse());
+    expect(ahead.map((c) => c.it.date)).toEqual([...ahead.map((c) => c.it.date)].sort());
+  });
+
+  it('stops offering bills past the horizon', () => {
+    const s = fixture();
+    s.rules = [rentRule()];
+    const picks = repaymentPicks(s, 'home', 'marc', 'lea');
+    expect(pick(picks, 'rule-rent|' + addMonths(thisMonth(), REPAY_AHEAD))).toBeDefined();
+    expect(pick(picks, 'rule-rent|' + addMonths(thisMonth(), REPAY_AHEAD + 1))).toBeUndefined();
   });
 });
 

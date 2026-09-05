@@ -44,12 +44,17 @@ export function upcomingRules(s: AppState, ledgerId: string, fromMonth: MonthKey
   return out.slice(0, 4);
 }
 
-/** Every occurrence from the earliest rule start up to the current month. */
-export function allOccurrencesEver(s: AppState, ledgerId: string): Occurrence[] {
+/**
+ * Every occurrence from the earliest rule start up to the current month, and
+ * `ahead` months further when asked — bills that haven't landed yet are no
+ * part of what has been spent, but they are something you can hand someone
+ * your half of, so the repayment picker reaches past today and nothing else does.
+ */
+export function allOccurrencesEver(s: AppState, ledgerId: string, ahead = 0): Occurrence[] {
   const rs = s.rules.filter((r) => r.ledgerId === ledgerId);
   if (!rs.length) return [];
   const from = Math.min(...rs.map((r) => monthIndex(r.startMonth || thisMonth())));
-  const to = Math.max(from, monthIndex(thisMonth()));
+  const to = Math.max(from, monthIndex(thisMonth()) + ahead);
   const out: Occurrence[] = [];
   for (let i = from; i <= to; i++) {
     const mk = monthFromIndex(i);
@@ -76,6 +81,25 @@ export function itemsInScope(
   const rec = monthKey
     ? occurrencesFor(s, ledgerId, monthKey).filter((o) => !o.skipped)
     : allOccurrencesEver(s, ledgerId);
+  return [...rec, ...ad];
+}
+
+/** How many months of bills yet to land a repayment can be logged against. */
+export const REPAY_AHEAD = 3;
+
+/**
+ * Everything a repayment can be logged against: what has actually cost money,
+ * plus what is only booked so far — planned expenses and the next few months
+ * of bills. Paying someone your half of next month's rent before it leaves
+ * their account is ordinary, so this list is deliberately wider than the one
+ * the tally is built from. Money handed over for something that hasn't landed
+ * leaves the payer in credit until it does, which is exactly what happened.
+ */
+export function repayableItems(s: AppState, ledgerId: string): LedgerItem[] {
+  const ad = s.expenses
+    .filter((e) => e.ledgerId === ledgerId)
+    .map((e) => ({ ...e, kind: 'adhoc' as const }));
+  const rec = allOccurrencesEver(s, ledgerId, REPAY_AHEAD).filter((o) => !o.skipped);
   return [...rec, ...ad];
 }
 

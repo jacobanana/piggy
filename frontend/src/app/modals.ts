@@ -1,5 +1,5 @@
 /** Modal forms and their save handlers. Transient form state lives in F. */
-import type { Account, Expense, Ledger, LedgerItem, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
+import type { Account, Expense, Ledger, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
 import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
@@ -9,9 +9,10 @@ import { repaintIfOwed } from './sync';
 import { lockSection } from './lock';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, pairwiseDebt, settledItemIds, settlementMonths, simplifyDebts } from '../domain/balances';
+import { computeBalances, repaymentPicks, settlementMonths, simplifyDebts } from '../domain/balances';
+import type { RepayPick } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
-import { defaultAccountId, itemsInScope, overrideOf } from '../domain/selectors';
+import { defaultAccountId, overrideOf } from '../domain/selectors';
 
 /** Transient form state (emoji + split being edited, etc.). Cleared on close. */
 export const F: {
@@ -444,49 +445,50 @@ function personOptions(sel?: string): string {
 /** Beyond this the picker would be a wall of rows, so it stops and says so. */
 const PICK_LIMIT = 40;
 
-/** Everything in the ledger that ever cost money, whatever month it fell in. */
-const everyItem = (): LedgerItem[] => itemsInScope(S, activeLedger()!.id, null);
+/** Every item this repayment could name, with what each still owes. */
+const picksFor = (from: string, to: string): RepayPick[] =>
+  repaymentPicks(S, activeLedger()!.id, from, to, F.settleId);
 
 /**
- * Items worth offering for a repayment from -> to, newest first, each with
- * what it alone makes `from` owe `to`.
+ * The rows the picker actually shows, newest first.
+ *
+ * Every month is on offer, not just the one on screen — paying in July for
+ * August's rent is the ordinary case, and so is handing over your half before
+ * the bill has even landed. Something already ticked stays listed even once it
+ * is square, so editing an old repayment never drops it; everything else has to
+ * still owe something, part payments included.
  */
-function pickable(from: string, to: string): { it: LedgerItem; owed: number }[] {
+function pickable(picks: RepayPick[]): RepayPick[] {
   const picked = F.items || [];
-  const done = settledItemIds(S, activeLedger()!.id, F.settleId);
-  return everyItem()
-    .map((it) => ({ it, owed: pairwiseDebt(S, it, from, to) }))
-    /* Every month is on offer, not just the one on screen — paying in July for
-       August's rent is the ordinary case. Something already ticked stays listed
-       even once it is square, so editing an old repayment never drops it — but
-       anything an earlier repayment already covered is gone from the list. */
-    .filter((c) => picked.includes(c.it.id) || (c.owed > 0 && !done.has(c.it.id)))
-    .sort((a, b) => (a.it.date === b.it.date ? 0 : a.it.date < b.it.date ? 1 : -1));
-}
-
-/** Whether the picker is empty only because earlier repayments took it all. */
-function allAlreadyCovered(from: string, to: string): boolean {
-  const done = settledItemIds(S, activeLedger()!.id, F.settleId);
-  return everyItem().some((it) => done.has(it.id) && pairwiseDebt(S, it, from, to) > 0);
+  return picks.filter((c) => picked.includes(c.it.id) || c.left > 0);
 }
 
 export function pickBox(from: string, to: string): string {
-  const all = pickable(from, to);
+  const picks = picksFor(from, to);
+  const all = pickable(picks);
   if (!all.length) {
-    return '<div class="hint" style="margin-top:0">' + (allAlreadyCovered(from, to)
-      ? 'Everything between these two is already on an earlier repayment — just put the amount in below.'
+    /* Empty for two different reasons, and the difference is the whole point:
+       nothing was ever owed, or it was and earlier repayments cleared it. */
+    const covered = picks.some((c) => c.owed > 0 && c.left <= 0);
+    return '<div class="hint" style="margin-top:0">' + (covered
+      ? 'Everything between these two is already paid off — just put the amount in below.'
       : 'Nothing outstanding between these two right now — just put the amount in below.') + '</div>';
   }
   const picked = F.items || [];
-  const rows = all.slice(0, PICK_LIMIT).map(({ it, owed }) => {
+  const rows = all.slice(0, PICK_LIMIT).map(({ it, owed, repaid, left, ahead }) => {
     const on = picked.includes(it.id);
+    /* The figure on the right is what is still due, so a part-paid item asks
+       for the rest of it and nothing has to be worked out by hand. */
     return '<div class="item ' + (on ? 'on' : '') + '" data-act="pick-item" data-id="' + esc(it.id) + '">' +
       '<span class="tick">' + (on ? '✓' : '') + '</span>' +
       '<div class="emo">' + esc(it.emoji) + '</div>' +
       '<div class="item-main"><div class="name">' + esc(it.name) + '</div>' +
       '<div class="meta"><span>' + dayLabel(it.date) + '</span><span>·</span><span>of ' + money2(it.amount, it.currency) + '</span>' +
-      (it.kind === 'recurring' ? '<span class="tag">bill</span>' : '') + '</div></div>' +
-      '<div class="amount">' + money2(fromCents(owed), baseCur()) + '</div></div>';
+      (it.kind === 'recurring' ? '<span class="tag">bill</span>' : '') +
+      (ahead ? '<span class="tag">not paid yet</span>' : '') +
+      (repaid > 0 && left > 0 ? '<span class="tag">' + money2(fromCents(repaid), baseCur()) + ' paid</span>' : '') +
+      '</div></div>' +
+      '<div class="amount">' + money2(fromCents(left || owed), baseCur()) + '</div></div>';
   }).join('');
   return '<div class="picklist">' + rows + '</div>' +
     (all.length > PICK_LIMIT ? '<div class="hint">Showing the ' + PICK_LIMIT + ' most recent of ' + all.length + '.</div>' : '');
@@ -495,16 +497,23 @@ export function pickBox(from: string, to: string): string {
 const settleFrom = (): string => ($('#sFrom') as HTMLSelectElement | null)?.value || '';
 const settleTo = (): string => ($('#sTo') as HTMLSelectElement | null)?.value || '';
 
-/** What the ticked items come to, in base-currency cents. */
+/**
+ * What the ticked items still come to, in base-currency cents — what is left
+ * on them, not what they cost, so ticking something half repaid asks for the
+ * other half.
+ */
 function pickedCents(): number {
   const picked = F.items || [];
   if (!picked.length) return 0;
-  const from = settleFrom(), to = settleTo();
-  const byId = new Map(everyItem().map((it) => [it.id, it]));
-  return picked.reduce((sum, id) => {
-    const it = byId.get(id);
-    return sum + (it ? pairwiseDebt(S, it, from, to) : 0);
-  }, 0);
+  const byId = new Map(picksFor(settleFrom(), settleTo()).map((c) => [c.it.id, c]));
+  return picked.reduce((sum, id) => sum + (byId.get(id)?.left || 0), 0);
+}
+
+/** Whether anything ticked is money that hasn't actually gone out yet. */
+function pickedAhead(): boolean {
+  const picked = F.items || [];
+  if (!picked.length) return false;
+  return picksFor(settleFrom(), settleTo()).some((c) => c.ahead && picked.includes(c.it.id));
 }
 
 /** The same total in whatever currency the form is showing. */
@@ -533,10 +542,11 @@ export function syncPickedAmount(force?: boolean): void {
   hint.style.display = n ? '' : 'none';
   if (!n) { hint.innerHTML = ''; return; }
   const total = money2(fromCents(pickedCents()), baseCur());
-  hint.innerHTML = n + (n === 1 ? ' item' : ' items') + ' ticked · ' + total + ' owed' +
+  hint.innerHTML = n + (n === 1 ? ' item' : ' items') + ' ticked · ' + total + ' still due' +
     (overridden
-      ? ' — logging a different amount. <button type="button" class="linkish" data-act="use-picked-total">Use the total</button>'
-      : '. Type over the amount for a part payment.');
+      ? ' — logging a different amount. The rest stays due next time. <button type="button" class="linkish" data-act="use-picked-total">Use the total</button>'
+      : '. Type over the amount to pay part of it.') +
+    (pickedAhead() ? '<br>Something ticked hasn\'t been paid out yet — that leaves you in credit until it lands.' : '');
 }
 
 /** Redraw the picker after the people (and so the direction) changed. */
@@ -544,7 +554,7 @@ export function refreshPickBox(): void {
   const box = $('#pickBox');
   if (!box) return;
   const from = settleFrom(), to = settleTo();
-  const still = new Set(pickable(from, to).filter((c) => c.owed > 0).map((c) => c.it.id));
+  const still = new Set(picksFor(from, to).filter((c) => c.left > 0).map((c) => c.it.id));
   F.items = (F.items || []).filter((id) => still.has(id));
   box.innerHTML = pickBox(from, to);
   syncPickedAmount(true);

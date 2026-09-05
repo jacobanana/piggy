@@ -10,10 +10,10 @@
  * under the month of whatever it was ticked against.
  */
 import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types';
-import { itemsInScope } from './selectors';
+import { itemsInScope, repayableItems } from './selectors';
 import { splitCents } from './splits';
 import { toBase } from './fx';
-import { cents, monthIndex, monthOf } from '../lib/utils';
+import { cents, monthIndex, monthOf, thisMonth } from '../lib/utils';
 
 /**
  * What one item alone does to each person's balance, in base-currency cents.
@@ -162,17 +162,104 @@ export function settlementsInMonth(s: AppState, ledgerId: string, monthKey: Mont
 }
 
 /**
- * Ledger item ids already logged against a repayment — settled once, so not
- * worth offering again next time. `exceptId` is the repayment being edited,
- * whose own items stay on the table.
+ * How much of a repayment landed on each item it was ticked against, in
+ * base-currency cents.
+ *
+ * The tally only ever moves by the repayment's own amount; the ticked items
+ * say what that money was for. When it comes to less than they add up to —
+ * a part payment — it is spread over them in proportion to what each one
+ * owes, so half of two bills leaves half of each still due rather than one
+ * cleared and one untouched. Anything beyond what they add up to lands
+ * nowhere: it is money handed over above and beyond those items.
+ *
+ * Items the repayment names that no longer exist are ignored, so deleting an
+ * expense never strands part of a repayment against it.
  */
-export function settledItemIds(s: AppState, ledgerId: string, exceptId?: string | null): Set<string> {
-  const out = new Set<string>();
+function allocation(s: AppState, x: Settlement, byId: Map<string, LedgerItem>): Record<string, number> {
+  const ids = (x.itemIds || []).filter((id) => byId.has(id));
+  if (!ids.length) return {};
+  const owed = ids.map((id) => pairwiseDebt(s, byId.get(id)!, x.fromPersonId, x.toPersonId));
+  const total = owed.reduce((a, b) => a + b, 0);
+  if (total <= 0) return {};
+
+  const out: Record<string, number> = {};
+  const paid = cents(toBase(s.settings.rates, x.amount, x.currency, x.fxRate));
+  if (paid >= total) {
+    ids.forEach((id, i) => { out[id] = owed[i]; });
+    return out;
+  }
+  const share = owed.map((c) => Math.floor((paid * c) / total));
+  /* Flooring loses up to one cent per item; the biggest debts take them back,
+     the same "someone has to absorb the leftover" rule the splits follow. */
+  let left = paid - share.reduce((a, b) => a + b, 0);
+  owed
+    .map((_, i) => i)
+    .sort((a, b) => owed[b] - owed[a])
+    .forEach((i) => { if (left > 0 && share[i] < owed[i]) { share[i]++; left--; } });
+  ids.forEach((id, i) => { out[id] = share[i]; });
+  return out;
+}
+
+/** One item a repayment can be logged against, and where it stands. */
+export interface RepayPick {
+  it: LedgerItem;
+  /** What this item alone makes `from` owe `to`, in base-currency cents. */
+  owed: number;
+  /** How much of that earlier repayments already covered. */
+  repaid: number;
+  /** What is still due: `owed` less `repaid`, never below zero. */
+  left: number;
+  /** Money that hasn't moved yet — a planned expense, or a bill still to land. */
+  ahead: boolean;
+}
+
+/**
+ * Every item a repayment from `from` to `to` could name, newest first, each
+ * with what it still owes after everything already repaid against it.
+ *
+ * Only repayments running the same way count: money going the other way is
+ * its own debt, not a dent in this one. `exceptId` is the repayment being
+ * edited — its own share goes back on the table so the form can restate it.
+ *
+ * What has actually been paid comes first, newest first, because that is what
+ * a repayment is nearly always for. What hasn't landed yet follows, soonest
+ * first — reachable, but never in the way of the bill you just split.
+ */
+export function repaymentPicks(
+  s: AppState,
+  ledgerId: string,
+  from: string,
+  to: string,
+  exceptId?: string | null,
+): RepayPick[] {
+  const items = repayableItems(s, ledgerId);
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const now = thisMonth();
+
+  const repaid: Record<string, number> = {};
   s.settlements.forEach((x) => {
     if (x.ledgerId !== ledgerId || (exceptId && x.id === exceptId)) return;
-    (x.itemIds || []).forEach((id) => out.add(id));
+    if (x.fromPersonId !== from || x.toPersonId !== to) return;
+    Object.entries(allocation(s, x, byId)).forEach(([id, c]) => { repaid[id] = (repaid[id] || 0) + c; });
   });
-  return out;
+
+  return items
+    .map((it) => {
+      const owed = pairwiseDebt(s, it, from, to);
+      const done = repaid[it.id] || 0;
+      return {
+        it,
+        owed,
+        repaid: done,
+        left: Math.max(0, owed - done),
+        ahead: it.kind === 'recurring' ? monthIndex(it.period) > monthIndex(now) : it.planned,
+      };
+    })
+    .sort((a, b) => {
+      if (a.ahead !== b.ahead) return a.ahead ? 1 : -1;
+      if (a.it.date === b.it.date) return 0;
+      return (a.it.date < b.it.date ? 1 : -1) * (a.ahead ? -1 : 1);
+    });
 }
 
 /** Spend per category emoji, biggest first, in base-currency cents. */
