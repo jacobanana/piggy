@@ -1,13 +1,17 @@
 /**
- * The tally: who owes whom, across the whole ledger.
+ * The tally: who owes whom.
  *
- * Expenses belong to a month; the tally never does. Somebody paying on the
- * 28th of July for August's rent is settling a real debt, and a tally that
- * reset every month would either lose that money or count it twice. So the
- * balance and what each side has paid run from the first entry to the last.
- * Only what describes one month rather than the debt between people takes a
- * month: `categoryTotals`, and `settlementsInMonth`, which files a repayment
- * under the month of whatever it was ticked against.
+ * It is kept two ways, and both are true at once. `computeBalances` runs from
+ * the first entry to the last — that is the debt you actually settle, and it
+ * has to span the ledger, because somebody paying on the 28th of July for
+ * August's rent is settling a real debt and a balance that reset every month
+ * would either lose that money or count it twice. `monthlyBalances` cuts the
+ * same figures into the month each one belongs to, so a month can be read on
+ * its own: what it cost, what came back, and what it left between you.
+ *
+ * Nothing is lost in the cut. Every item is filed under its own month, and a
+ * repayment is split across the months of whatever it was ticked against, so
+ * the months add back up to the running total.
  */
 import type { AppState, LedgerItem, MonthKey, Settlement } from '../model/types';
 import { itemsInScope, repayableItems } from './selectors';
@@ -16,19 +20,31 @@ import { toBase } from './fx';
 import { cents, monthIndex, monthOf, thisMonth } from '../lib/utils';
 
 /**
- * What one item alone does to each person's balance, in base-currency cents.
- * Left unrounded: callers that sum many items round once at the end.
+ * What paying for one item credits each person, in base-currency cents: the
+ * money left their account, by ownership share. Left unrounded — callers that
+ * sum many items round once at the end.
  */
-function itemDeltas(s: AppState, it: LedgerItem, ids: string[]): Record<string, number> {
-  const d: Record<string, number> = {};
-  ids.forEach((id) => { d[id] = 0; });
+function paidShares(s: AppState, it: LedgerItem, ids: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  ids.forEach((id) => { out[id] = 0; });
   const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
   const acc = s.accounts.find((a) => a.id === it.accountId);
   if (acc) {
     Object.entries(acc.ownership).forEach(([pid, share]) => {
-      if (d[pid] != null) d[pid] += tc * Number(share);
+      if (out[pid] != null) out[pid] += tc * Number(share);
     });
   }
+  return out;
+}
+
+/**
+ * What one item alone does to each person's balance, in base-currency cents:
+ * what they paid for it, less the share of it that was theirs. Unrounded, as
+ * `paidShares` is.
+ */
+function itemDeltas(s: AppState, it: LedgerItem, ids: string[]): Record<string, number> {
+  const d = paidShares(s, it, ids);
+  const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
   const owed = splitCents(it.split, tc, ids);
   Object.entries(owed).forEach(([pid, c]) => { if (d[pid] != null) d[pid] -= c; });
   return d;
@@ -97,16 +113,11 @@ export function simplifyDebts(bal: Record<string, number>): { from: string; to: 
 
 /** Base-currency cents each person's accounts have paid out, all told. */
 export function paidByTotals(s: AppState, ledgerId: string): Record<string, number> {
+  const ids = s.people.map((p) => p.id);
   const out: Record<string, number> = {};
-  s.people.forEach((p) => { out[p.id] = 0; });
+  ids.forEach((id) => { out[id] = 0; });
   itemsInScope(s, ledgerId, null).forEach((it) => {
-    const tc = cents(toBase(s.settings.rates, it.amount, it.currency, it.fxRate));
-    const acc = s.accounts.find((a) => a.id === it.accountId);
-    if (acc) {
-      Object.entries(acc.ownership).forEach(([pid, sh]) => {
-        if (out[pid] != null) out[pid] += tc * Number(sh);
-      });
-    }
+    Object.entries(paidShares(s, it, ids)).forEach(([pid, c]) => { out[pid] += c; });
   });
   Object.keys(out).forEach((k) => { out[k] = Math.round(out[k]); });
   return out;
@@ -198,6 +209,113 @@ function allocation(s: AppState, x: Settlement, byId: Map<string, LedgerItem>): 
     .forEach((i) => { if (left > 0 && share[i] < owed[i]) { share[i]++; left--; } });
   ids.forEach((id, i) => { out[id] = share[i]; });
   return out;
+}
+
+/** One month of the tally, in base-currency cents. */
+export interface MonthTally {
+  month: MonthKey;
+  /** Net position per person for this month alone. Positive: they are owed. */
+  balances: Record<string, number>;
+  /** What each person's accounts paid out for this month's entries. */
+  paid: Record<string, number>;
+  /** What each person handed back in repayments filed under this month. */
+  back: Record<string, number>;
+}
+
+/**
+ * Which month a repayment's money belongs to, cent by cent.
+ *
+ * The ticked items decide it, each taking the share `allocation` gave it and
+ * filing it under its own month — half of July's rent is July's money whenever
+ * it was handed over. Whatever is left over is money no item accounts for: a
+ * repayment with nothing ticked, the part of one that overshot what it named,
+ * or a share that was ticked against an entry since deleted. That has only the
+ * date to go on, so it belongs to the month the money moved — the same
+ * fallback `settlementMonths` uses for the log.
+ */
+function settlementByMonth(
+  s: AppState,
+  x: Settlement,
+  byId: Map<string, LedgerItem>,
+): Record<MonthKey, number> {
+  const out: Record<MonthKey, number> = {};
+  const add = (m: MonthKey, c: number): void => { out[m] = (out[m] || 0) + c; };
+  let left = cents(toBase(s.settings.rates, x.amount, x.currency, x.fxRate));
+  Object.entries(allocation(s, x, byId)).forEach(([id, c]) => {
+    const m = itemMonth(s, id);
+    if (!m || c <= 0) return;
+    add(m, c);
+    left -= c;
+  });
+  if (left > 0) add(monthOf(x.date), left);
+  return out;
+}
+
+/**
+ * The tally cut into months, oldest first — one entry per month anything
+ * happened in, and none for the quiet months between.
+ *
+ * A month's balance is what its own entries did, less the repayments filed
+ * under it. Summed, the months come back to `computeBalances`, give or take
+ * the cent a joint share can lose to rounding each month rather than once at
+ * the end.
+ */
+export function monthlyBalances(s: AppState, ledgerId: string): MonthTally[] {
+  const ids = s.people.map((p) => p.id);
+  const months = new Map<MonthKey, MonthTally>();
+  const bucket = (m: MonthKey): MonthTally => {
+    let t = months.get(m);
+    if (!t) {
+      t = { month: m, balances: {}, paid: {}, back: {} };
+      ids.forEach((id) => { t!.balances[id] = 0; t!.paid[id] = 0; t!.back[id] = 0; });
+      months.set(m, t);
+    }
+    return t;
+  };
+
+  itemsInScope(s, ledgerId, null).forEach((it) => {
+    /* A bill belongs to the month it is for, which is not always the month it
+       is dated: a rule due on the 28th still bills the period it names. */
+    const t = bucket(it.kind === 'recurring' ? it.period : monthOf(it.date));
+    Object.entries(paidShares(s, it, ids)).forEach(([pid, c]) => { t.paid[pid] += c; });
+    Object.entries(itemDeltas(s, it, ids)).forEach(([pid, c]) => { t.balances[pid] += c; });
+  });
+
+  const byId = new Map(repayableItems(s, ledgerId).map((it) => [it.id, it]));
+  s.settlements
+    .filter((x) => x.ledgerId === ledgerId)
+    .forEach((x) => {
+      Object.entries(settlementByMonth(s, x, byId)).forEach(([m, c]) => {
+        const t = bucket(m);
+        if (t.balances[x.fromPersonId] != null) { t.balances[x.fromPersonId] += c; t.back[x.fromPersonId] += c; }
+        if (t.balances[x.toPersonId] != null) t.balances[x.toPersonId] -= c;
+      });
+    });
+
+  return [...months.values()]
+    .map((t) => {
+      ids.forEach((id) => {
+        t.balances[id] = Math.round(t.balances[id]);
+        t.paid[id] = Math.round(t.paid[id]);
+        t.back[id] = Math.round(t.back[id]);
+      });
+      return t;
+    })
+    .sort((a, b) => monthIndex(a.month) - monthIndex(b.month));
+}
+
+/** One month of the tally, zeroed when nothing at all landed in it. */
+export function monthTally(s: AppState, ledgerId: string, monthKey: MonthKey): MonthTally {
+  const found = monthlyBalances(s, ledgerId).find((t) => t.month === monthKey);
+  if (found) return found;
+  const empty: MonthTally = { month: monthKey, balances: {}, paid: {}, back: {} };
+  s.people.forEach((p) => { empty.balances[p.id] = 0; empty.paid[p.id] = 0; empty.back[p.id] = 0; });
+  return empty;
+}
+
+/** Whether a month moved any money at all — spent, or handed back. */
+export function monthMoved(t: MonthTally): boolean {
+  return Object.keys(t.paid).some((id) => t.paid[id] !== 0 || t.back[id] !== 0);
 }
 
 /** One item a repayment can be logged against, and where it stands. */

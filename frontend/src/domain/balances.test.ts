@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeBalances, pairwiseDebt, repaymentPicks, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from './balances';
+import { computeBalances, monthTally, monthlyBalances, pairwiseDebt, repaymentPicks, settlementsFor, settlementsInMonth, simplifyDebts, spendSummary } from './balances';
 import type { RepayPick } from './balances';
 import { REPAY_AHEAD } from './selectors';
 import { blankState } from '../model/state';
@@ -110,6 +110,132 @@ describe('computeBalances', () => {
     s.settlements = [settlement({ date: '2025-07-28' })];
     expect(computeBalances(s, 'home').marc).toBe(5000);
     expect(computeBalances(s, 'home').lea).toBe(-5000);
+  });
+});
+
+describe('monthlyBalances', () => {
+  /** What every month adds up to, person by person — the sum the cut must keep. */
+  const summed = (s: AppState): Record<string, number> => {
+    const out: Record<string, number> = { lea: 0, marc: 0 };
+    monthlyBalances(s, 'home').forEach((t) => {
+      out.lea += t.balances.lea;
+      out.marc += t.balances.marc;
+    });
+    return out;
+  };
+
+  it('files each month under itself instead of running one figure on', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02', amount: 40 })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-03', '2025-04']);
+    expect(months[0].balances.marc).toBe(-5000);
+    expect(months[1].balances.marc).toBe(-2000);
+  });
+
+  it('adds back up to the running tally', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02', amount: 40 })];
+    s.settlements = [settlement({ amount: 30 })];
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('says what a month cost and what came back, not just the balance', () => {
+    const s = fixture();
+    s.expenses = [expense({})];
+    s.settlements = [settlement({ amount: 20 })];
+    const [mar] = monthlyBalances(s, 'home');
+    expect(mar.paid).toEqual({ lea: 10000, marc: 0 });
+    expect(mar.back).toEqual({ lea: 0, marc: 2000 });
+    expect(mar.balances.marc).toBe(-3000);
+  });
+
+  /* The one thing a per-month tally could get wrong: money handed over in July
+     for August's groceries is August's money, not July's. */
+  it('files a repayment under the month of what it was ticked against', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04' })];
+    s.settlements = [settlement({ date: '2025-07-28', itemIds: ['e-aug'] })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-08']);
+    expect(months[0].balances).toEqual({ lea: 0, marc: 0 });
+  });
+
+  it('splits one repayment across every month it covers', () => {
+    const s = fixture();
+    s.expenses = [
+      expense({ id: 'e-jul', date: '2025-07-02' }),          // Marc owes 50
+      expense({ id: 'e-aug', date: '2025-08-04', amount: 300 }),  // Marc owes 150
+    ];
+    s.settlements = [settlement({ date: '2025-09-01', amount: 200, itemIds: ['e-jul', 'e-aug'] })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-07', '2025-08']);
+    expect(months[0].back.marc).toBe(5000);
+    expect(months[1].back.marc).toBe(15000);
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('files a repayment with nothing ticked under the month it moved', () => {
+    const s = fixture();
+    s.settlements = [settlement({ date: '2025-07-28' })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-07']);
+    expect(months[0].balances.marc).toBe(5000);
+  });
+
+  it('lands the part of a repayment no item accounts for on its own date', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-jul', date: '2025-07-02' })];   // Marc owes 50
+    s.settlements = [settlement({ date: '2025-09-01', amount: 80, itemIds: ['e-jul'] })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-07', '2025-09']);
+    expect(months[0].back.marc).toBe(5000);
+    expect(months[1].back.marc).toBe(3000);
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('falls back to the date once the item a repayment named is gone', () => {
+    const s = fixture();
+    s.settlements = [settlement({ date: '2025-07-28', itemIds: ['e-deleted'] })];
+    expect(monthlyBalances(s, 'home').map((t) => t.month)).toEqual(['2025-07']);
+  });
+
+  it('bills a recurring rule to the month it is for', () => {
+    const s = fixture();
+    s.rules = [{ ...rentRule(), startMonth: '2025-01', endMonth: '2025-02' }];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-01', '2025-02']);
+    months.forEach((t) => { expect(t.balances.marc).toBe(-60000); });
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('skips the quiet months between rather than printing zeros', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', date: '2025-06-02' })];
+    expect(monthlyBalances(s, 'home').map((t) => t.month)).toEqual(['2025-03', '2025-06']);
+  });
+
+  it('ignores another ledger entirely', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', ledgerId: 'trip', date: '2025-04-02' })];
+    expect(monthlyBalances(s, 'home').map((t) => t.month)).toEqual(['2025-03']);
+  });
+});
+
+describe('monthTally', () => {
+  it('hands back a month that saw nothing as zeros, not nothing', () => {
+    const s = fixture();
+    s.expenses = [expense({})];
+    const t = monthTally(s, 'home', '2025-05');
+    expect(t.month).toBe('2025-05');
+    expect(t.balances).toEqual({ lea: 0, marc: 0 });
+    expect(t.paid).toEqual({ lea: 0, marc: 0 });
+  });
+
+  it('picks the month out of the series', () => {
+    const s = fixture();
+    s.expenses = [expense({}), expense({ id: 'e2', date: '2025-04-02', amount: 40 })];
+    expect(monthTally(s, 'home', '2025-04').balances.marc).toBe(-2000);
   });
 });
 
