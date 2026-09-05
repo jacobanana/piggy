@@ -22,7 +22,7 @@ import type { AppState, Expense, LedgerItem, MonthKey, Settlement } from '../mod
 import type { Debt, SpendSummary } from './balances';
 import {
   categoryTotals, computeBalances, monthMoved, monthTally, paidBackTotals, paidByTotals,
-  settlementsInMonth, simplifyDebts, spendSummary,
+  settlementMonths, settlementsInMonth, simplifyDebts, spendSummary,
 } from './balances';
 import { itemsInScope, occurrencesFor, plannedInScope, plannedShares } from './selectors';
 import { toBase } from './fx';
@@ -36,20 +36,27 @@ function base(s: AppState, it: { amount: number; currency: string; fxRate?: numb
 /* ---------- the tally card ---------- */
 
 /**
- * The tally, for one scope: what it cost, what came back, and where the two
- * of you stand.
+ * The tally, for one scope: what it cost, what came back, and where that
+ * leaves you — all of it describing the same weeks.
  *
- * Two figures, and they can point opposite ways — a month is a slice and the
- * debt is not. `debts` is the headline and the one Settle up hands the form;
- * `monthDebts` is the subtotal above it. `opposed` is true when the month runs
- * against the ledger, which is the one case the card has to say out loud.
+ * One scope, one answer. This used to return two at once, the month's
+ * subtotal and the running total, because one card printed both: a September
+ * that left Adrien 9.95 short, with an ALL SQUARE stamp directly beneath it.
+ * Both were true — a month is a slice and the debt is not — and together they
+ * read as an app that could not add up. So the views were pulled apart
+ * instead: Monthly asks with a month, Total asks with `null`, and neither can
+ * contradict the other because neither knows what the other says.
+ *
+ * `debts` is therefore the scope's own, and on the whole-ledger scope it is
+ * also the list Settle up hands the form — which is why Settle up lives only
+ * on Total. There is no settling half a month.
  */
 export interface TallyView {
-  /** The month it covers, or null for the whole ledger (a trip). */
+  /** The month it covers, or null for the whole ledger. */
   month: MonthKey | null;
-  /** Net position per person over the whole ledger. Positive: they are owed. */
+  /** Net position per person, in scope. Positive: they are owed. */
   balances: Record<string, number>;
-  /** Who owes whom, over the whole ledger — the headline, and Settle up's list. */
+  /** Who owes whom, in scope. Empty when it squares. */
   debts: Debt[];
   /** What each person's accounts paid out, in scope. */
   paid: Record<string, number>;
@@ -59,30 +66,17 @@ export interface TallyView {
   moved: boolean;
   /** Whether anybody handed anything back in scope. */
   anyBack: boolean;
-  /** The month's own net position, or null when the scope has no month. */
-  monthBalances: Record<string, number> | null;
-  /** Who the month alone leaves owing whom. Empty when it squares. */
-  monthDebts: Debt[];
-  /** The month and the ledger leave the same person on opposite sides. */
-  opposed: boolean;
 }
 
 export function tallyView(s: AppState, ledgerId: string, monthKey: MonthKey | null): TallyView {
-  const balances = computeBalances(s, ledgerId);
   const t = monthKey ? monthTally(s, ledgerId, monthKey) : null;
 
-  /* Scope every row to the month when there is one: the paid-by rows, the
-     paid-back rows and the month's own subtotal all have to describe the same
-     weeks, or the receipt stops adding up in front of you. */
+  /* Every row off the one scope: the paid-by rows, the paid-back rows and the
+     balance under them all have to describe the same weeks, or the receipt
+     stops adding up in front of you. */
+  const balances = t ? t.balances : computeBalances(s, ledgerId);
   const paid = t ? t.paid : paidByTotals(s, ledgerId);
   const back = t ? t.back : paidBackTotals(s, ledgerId);
-
-  const opposed = !!t && s.people.some((p) => {
-    const m = t.balances[p.id] || 0, r = balances[p.id] || 0;
-    /* Sub-cent noise is nobody's debt, which is the cent `simplifyDebts`
-       ignores too. */
-    return Math.abs(m) > 1 && Math.abs(r) > 1 && (m > 0) !== (r > 0);
-  });
 
   return {
     month: monthKey,
@@ -92,9 +86,6 @@ export function tallyView(s: AppState, ledgerId: string, monthKey: MonthKey | nu
     back,
     moved: t ? monthMoved(t) : true,
     anyBack: s.people.some((p) => (back[p.id] || 0) !== 0),
-    monthBalances: t ? t.balances : null,
-    monthDebts: t ? simplifyDebts(t.balances) : [],
-    opposed,
   };
 }
 
@@ -104,9 +95,16 @@ export function tallyView(s: AppState, ledgerId: string, monthKey: MonthKey | nu
  * The repayments in scope, and what they came to.
  *
  * A month shows what was filed under it — whatever was ticked against one of
- * that month's items, plus anything logged that month with nothing ticked. A
- * trip has no months, so it gets the lot, grouped by the month the money
- * moved.
+ * that month's items, plus anything logged that month with nothing ticked.
+ * The whole-ledger scope gets the lot, grouped by that same filing and not by
+ * the day the money moved: Adrien's transfer of 28 July was ticked against
+ * August's rent, so Monthly counts it in August and the Total log has to head
+ * it August too. Grouped by date it sat under a July heading that no month
+ * tab agreed with — the same repayment in two months depending on which page
+ * you were reading.
+ *
+ * A repayment ticked across two months is listed once, under the earlier of
+ * them; the row names what it covers, so what it spans is on its face.
  */
 export interface RepaymentsView {
   /** Every repayment in scope, newest first. */
@@ -137,10 +135,13 @@ export function repaymentsView(s: AppState, ledgerId: string, monthKey: MonthKey
     if (list.length) groups.push({ month: monthKey, list });
   } else {
     list.forEach((x) => {
-      const m = monthOf(x.date);
+      const m = settlementMonths(s, x)[0] || monthOf(x.date);
       const g = groups.find((y) => y.month === m);
       if (g) g.list.push(x); else groups.push({ month: m, list: [x] });
     });
+    /* Newest month first, which the by-date order gave for free and filing
+       does not: an old transfer towards a recent month belongs with it. */
+    groups.sort((a, b) => (a.month < b.month ? 1 : a.month > b.month ? -1 : 0));
   }
 
   return { list, moved, perPair: [...pairs.values()], groups };

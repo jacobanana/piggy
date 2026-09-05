@@ -65,7 +65,7 @@ export function wireEvents(): void {
 
       case 'backdrop': if (e.target === el) closeModal(); return;
       case 'close': closeModal(); return;
-      case 'ledger': UI.ledgerId = id; UI.month = thisMonth(); render(); return;
+      case 'ledger': UI.ledgerId = id; UI.month = thisMonth(); UI.scope = 'month'; render(); return;
       case 'new-ledger': ledgerForm(); return;
       case 'edit-ledger': ledgerForm(ledger(id)); return;
       case 'ledger-kind': {
@@ -86,6 +86,10 @@ export function wireEvents(): void {
         }
         return;
       case 'month': UI.month = v === '0' ? thisMonth() : addMonths(UI.month, Number(v)); render(); return;
+      /* Switching tab starts at the top: Total is a different page, and
+         landing halfway down it at the scroll depth of a month reads as the
+         app having lost your place. */
+      case 'scope': UI.scope = v === 'all' ? 'all' : 'month'; render(); window.scrollTo({ top: 0 }); return;
       case 'add': if (l && l.kind === 'trip') expenseForm(); else addChooser(); return;
       case 'new-exp': expenseForm(); return;
       case 'new-rule': ruleForm(); return;
@@ -153,7 +157,7 @@ export function wireEvents(): void {
       case 'settle': settleModal(); return;
       /* The tally opened up. The chips reopen the same sheet at the other
          scope — one sheet, two scopes, rather than two sheets to keep alike. */
-      case 'tally': tallyModal(); return;
+      case 'tally': tallyModal(v || undefined); return;
       case 'tally-scope': tallyModal(v); return;
       case 'do-settle': doSettle(el.dataset.from!, el.dataset.to!, el.dataset.c!); return;
       case 'new-settle':

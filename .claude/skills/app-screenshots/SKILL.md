@@ -30,6 +30,7 @@ node .claude/skills/app-screenshots/scripts/screenshot.mjs --seed --width phone 
 | --- | --- |
 | `--seed` | Load a realistic book (two people, bills, extras, a trip, a repayment) into localStorage before the shot. Without it you photograph the onboarding screen. |
 | `--solo` | Seed the same book with one person on it, one account and nothing settled — the shape where Piggy hides every who-paid field. |
+| `--book <path>` | Seed a real exported book instead. A figure someone reported is reproduced from their own export, never from the canned one. |
 | `--empty` | Explicitly photograph the onboarding screen. |
 | `--width phone\|tablet\|desktop\|<px>` | Repeatable. phone=390, tablet=768, desktop=1440. |
 | `--height <px>` | Viewport height for every width. A modal is its own scroller, so this — not `--full-page` — is how you get a long sheet in one shot. |

@@ -12,15 +12,30 @@ import { syncBookName } from './session';
 import { thisMonth } from '../lib/utils';
 import { rateOf as fxRateOf, toBase as fxToBase } from '../domain/fx';
 
-/** `month` scopes the whole household view — the lists, and the tally with them.
- *  Only the running total inside the tally still spans the ledger. */
+/**
+ * `scope` picks which of a household ledger's two tabs is open, and `month`
+ * says which month the Monthly one is on.
+ *
+ * They are two views of the same book and each answers exactly one question:
+ * Monthly is these weeks alone — what they cost, and what they left between
+ * you — and Total is every month together, which is the debt you would
+ * actually settle. Nothing prints both at once. It used to: one card carried
+ * the month's subtotal and the running total together, and a September that
+ * left somebody 9.95 short under an ALL SQUARE stamp is two true figures
+ * reading as one broken app.
+ *
+ * A trip has no months, so it has no tabs — its view is the whole ledger.
+ */
+export type Scope = 'month' | 'all';
+
 export interface UIState {
   ledgerId: string | null;
   month: string;
+  scope: Scope;
 }
 
 export let S: AppState = blankState();
-export const UI: UIState = { ledgerId: null, month: thisMonth() };
+export const UI: UIState = { ledgerId: null, month: thisMonth(), scope: 'month' };
 
 export function setState(next: AppState): void { S = next; }
 

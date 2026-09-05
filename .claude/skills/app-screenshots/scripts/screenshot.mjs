@@ -30,11 +30,14 @@ const HEIGHTS = { 390: 844, 768: 1024 };
 const DEFAULT_HEIGHT = 900;
 
 const args = process.argv.slice(2);
-const opt = { widths: [], clicks: [], seed: false, solo: false, empty: false, fullPage: false, height: null, name: 'shot', base: null };
+const opt = { widths: [], clicks: [], seed: false, solo: false, empty: false, fullPage: false, height: null, name: 'shot', base: null, book: null };
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case '--seed': opt.seed = true; break;
     case '--solo': opt.seed = true; opt.solo = true; break;
+    // A real export, when the shot is about a book only that book produces —
+    // a reported figure is reproduced from the reporter's own data or not at all.
+    case '--book': opt.seed = true; opt.book = args[++i]; break;
     case '--empty': opt.empty = true; break;
     case '--full-page': opt.fullPage = true; break;
     case '--width': opt.widths.push(args[++i]); break;
@@ -155,7 +158,9 @@ for (const w of opt.widths) {
   });
 
   if (opt.seed) {
-    const book = JSON.stringify(opt.solo ? soloBook() : seedBook());
+    const book = opt.book
+      ? readFileSync(resolve(opt.book), 'utf8')
+      : JSON.stringify(opt.solo ? soloBook() : seedBook());
     await page.addInitScript(`localStorage.setItem('piggy.ledger.v1', ${JSON.stringify(book)});`);
   }
   await page.goto(baseUrl(), { waitUntil: 'networkidle' });
