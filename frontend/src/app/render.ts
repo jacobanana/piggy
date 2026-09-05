@@ -107,18 +107,22 @@ function renderNoLedger(): void {
 /* ---------- receipt ---------- */
 /**
  * The tally, for the month the nav is on — what these weeks alone cost, what
- * came back, and what they left between you.
+ * came back, and where the two of you actually stand.
  *
- * It used to print one figure for the whole ledger, which answered a question
- * nobody was on this screen to ask: every other card says September, and the
- * tally said "everything since January". A month is what you settle up over.
+ * The card carries two figures and they can point opposite ways: September on
+ * its own can leave Adrien 9.95 short while the ledger as a whole still has
+ * Flavia 111.80 behind, because a month is a slice and the debt is not. So the
+ * loud one has to be the one you can act on. It used to be the month's — a
+ * dashed box saying "Adrien owes Flavia 9.95" with "Flavia owes Adrien 111.80"
+ * in small print under it, and the Settle up button beneath both quietly
+ * meaning the second. Two answers to the one question the tally exists for,
+ * and the button agreed with the quiet one.
  *
- * The running total is still here, and still the number the Settle up button
- * hands to the form — a repayment made in July for August's bills has to
- * count whichever month you happen to be reading, so the debt you actually owe
- * spans the ledger. It sits under the month as the small print: this month,
- * then where that leaves you. A trip has no months, so it gets the running
- * total alone, exactly as it always did.
+ * Now the headline is the running total — the debt you would settle, the same
+ * figure Settle up hands the form — and the month is a subtotal above it,
+ * named as such. When the two run opposite ways the card says so in a line,
+ * rather than leaving the reader to work out that the receipt disagrees with
+ * itself. A trip has no months, so it gets the running total alone.
  */
 export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const bal = computeBalances(S, l.id);
@@ -131,9 +135,13 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const soft = (k: string, v: number): string =>
     '<div class="rrow" style="color:var(--ink-soft)"><span>' + k + '</span><span class="dots"></span><span>' +
     fromCents(v).toFixed(2) + '</span></div>';
+  const owes = (d: { from: string; to: string; cents: number }): string =>
+    '<div class="rrow"><span>' + esc(person(d.from)?.name || '?') + ' owes ' +
+    esc(person(d.to)?.name || '?') + '</span><span class="dots"></span><span class="val">' +
+    fromCents(d.cents).toFixed(2) + '</span></div>';
 
   /* Scope everything to the month when there is one: the paid-by rows, the
-     paid-back rows and the debt below them all have to describe the same
+     paid-back rows and the month's own subtotal all have to describe the same
      weeks, or the receipt stops adding up in front of you. */
   const paid = t ? t.paid : paidByTotals(S, l.id);
   const back: Record<string, number> = {};
@@ -152,31 +160,39 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const backRows = anyBack ? '<div class="tear"></div>' + S.people.map((p) =>
     soft('paid back by ' + esc(p.name), back[p.id] || 0)).join('') : '';
 
-  /* The headline: the month on its own, or the whole trip when there is no
-     month to be on. */
-  const headDebts = simplifyDebts(t ? t.balances : bal);
-  const note = t ? esc(monthLabel(t.month)) : 'everything so far';
-  const body = headDebts.length ? headDebts.map((d) => {
-    const a = person(d.from), b = person(d.to);
-    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div><div class="sub">' + note + '</div></div>' +
-      '<span class="amt">' + money(fromCents(d.cents), baseCur()) + '</span></div>';
-  }).join('') : '<div class="stamp">' + (t ? 'SQUARE THIS MONTH ✨' : 'ALL SQUARE ✨') + '</div>';
+  /* The month as a subtotal: what these weeks alone left between you, in the
+     same rows the figures above it use. Whoever the month leaves short is not
+     necessarily whoever the ledger does — that is the next line's job to say.
+     Sub-cent noise is nobody's debt, which is the same cent `simplifyDebts`
+     ignores. */
+  const monthDebts = t ? simplifyDebts(t.balances) : [];
+  const opposed = !!t && S.people.some((p) => {
+    const m = t.balances[p.id] || 0, r = bal[p.id] || 0;
+    return Math.abs(m) > 1 && Math.abs(r) > 1 && (m > 0) !== (r > 0);
+  });
+  const month = !t ? '' :
+    '<div class="receipt-title" style="margin-bottom:6px">' + esc(monthLabel(t.month)) + ' on its own</div>' +
+    (monthDebts.length
+      ? monthDebts.map(owes).join('')
+      : '<div class="hint center" style="margin:0">Square this month.</div>') +
+    (opposed
+      ? '<div class="hint center" style="margin:6px 0 0">The months before it run the other way, and outweigh it.</div>'
+      : '') +
+    '<div class="tear"></div>';
 
-  /* And the tail: the debt that outlives the month. Rows rather than another
-     dashed box — one headline per receipt, or neither reads as the answer. */
-  const running = !t ? '' : '<div class="tear"></div>' +
-    '<div class="receipt-title" style="margin-bottom:6px">everything so far</div>' +
-    (debts.length
-      ? debts.map((d) => '<div class="rrow"><span>' + esc(person(d.from)?.name || '?') + ' owes ' +
-        esc(person(d.to)?.name || '?') + '</span><span class="dots"></span><span class="val">' +
-        fromCents(d.cents).toFixed(2) + '</span></div>').join('')
-      : '<div class="hint center" style="margin:0">Nothing owed either way.</div>');
+  /* The headline: the debt that outlives the month, and the one the button
+     under it settles. */
+  const body = debts.length ? debts.map((d) => {
+    const a = person(d.from), b = person(d.to);
+    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div><div class="sub">everything so far</div></div>' +
+      '<span class="amt">' + money(fromCents(d.cents), baseCur()) + '</span></div>';
+  }).join('') : '<div class="stamp">ALL SQUARE ✨</div>';
 
   return '<div class="receipt" style="padding-top:22px">' +
     '<div class="receipt-title">the tally · ' + esc(baseCur()) + '</div>' +
     (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">' +
-      (t ? 'This month on its own, then the running total' : 'Every month together, whenever the money moved') + '</div>') +
-    paidRows + backRows + (paidRows || backRows ? '<div class="tear"></div>' : '') + body + running +
+      (t ? 'This month on its own, then where you stand' : 'Every month together, whenever the money moved') + '</div>') +
+    paidRows + backRows + (paidRows || backRows ? '<div class="tear"></div>' : '') + month + body +
     '<button class="today-link" style="margin:14px 0 0;width:100%" data-act="tally">see who paid what ›</button>' +
     (debts.length ? '<button class="btn mint wide" style="margin-top:8px" data-act="settle">Settle up 🤝</button>' : '') +
     '</div>';
