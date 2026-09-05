@@ -1,11 +1,11 @@
 /** All read-only rendering: the ledger bar, the two ledger views, the cards. */
 import type { Expense, Ledger, LedgerItem, MonthKey, Person, Settlement } from '../model/types';
+import type { Scope } from './context';
 import { S, UI, account, activeLedger, baseCur, person, rule, save, accountEmoji, accountLabel, solo, toBase } from './context';
 import { COLORS } from './theme';
 import { onServer, profile } from './session';
 import { FREQ_TAG, PAY_LABEL } from '../lib/constants';
 import { $, dayLabel, esc, fromCents, money, monthLabel, thisMonth } from '../lib/utils';
-import type { Debt } from '../domain/balances';
 import type { SpentView } from '../domain/tally';
 import { repaymentsView, spentView, tallyView } from '../domain/tally';
 import { upcomingRules } from '../domain/selectors';
@@ -108,31 +108,26 @@ function renderNoLedger(): void {
 
 /* ---------- receipt ---------- */
 /**
- * The tally, for the month the nav is on — what these weeks alone cost, what
- * came back, and where the two of you actually stand.
+ * The tally for one scope, and only that scope: what it cost, what came back,
+ * and what it leaves between you.
  *
- * The card carries two figures and they can point opposite ways: September on
- * its own can leave Adrien 9.95 short while the ledger as a whole still has
- * Flavia 111.80 behind, because a month is a slice and the debt is not. So the
- * loud one has to be the one you can act on. It used to be the month's — a
- * dashed box saying "Adrien owes Flavia 9.95" with "Flavia owes Adrien 111.80"
- * in small print under it, and the Settle up button beneath both quietly
- * meaning the second. Two answers to the one question the tally exists for,
- * and the button agreed with the quiet one.
+ * The card used to carry two figures at once — the month's own subtotal and
+ * the running total under it — and they can point opposite ways, because a
+ * month is a slice and the debt is not. September left Adrien 9.95 short
+ * directly above an ALL SQUARE stamp. Both true, and together unreadable: the
+ * question "so do I owe anything?" got two answers in one card, and every
+ * month since has been an argument about which one counted.
  *
- * Now the headline is the running total — the debt you would settle, the same
- * figure Settle up hands the form — and the month is a subtotal above it,
- * named as such. When the two run opposite ways the card says so in a line,
- * rather than leaving the reader to work out that the receipt disagrees with
- * itself. It says so in the flatter case too: a ledger that is square while
- * the month is not printed "Adrien owes Flavia 9.95" with an ALL SQUARE stamp
- * immediately under it and nothing at all in between, which reads as the app
- * being wrong rather than as two true figures at two scales. A trip has no
- * months, so it gets the running total alone.
+ * So the scopes are two tabs now, and this card belongs to whichever one is
+ * open. Monthly hands it a month and it prints that month alone; Total hands
+ * it `null` and it prints the running total, which is the only scope you can
+ * settle — hence Settle up on Total and nowhere else. The month gets a link
+ * across instead of a second figure.
  */
 export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const v = tallyView(S, l.id, mk);
   const debts = v.debts;
+  const whole = !mk;
   /* No per-person +/- line here. It read as a second, contradictory answer to
      the one question the tally exists for — "Léa -1153.78 / Marc +1153.78"
      above "Léa owes Marc 1153.78" is the same fact three times, in a sign
@@ -140,46 +135,48 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const soft = (k: string, v2: number): string =>
     '<div class="rrow" style="color:var(--ink-soft)"><span>' + k + '</span><span class="dots"></span><span>' +
     fromCents(v2).toFixed(2) + '</span></div>';
-  const owes = (d: Debt): string =>
-    '<div class="rrow"><span>' + esc(person(d.from)?.name || '?') + ' owes ' +
-    esc(person(d.to)?.name || '?') + '</span><span class="dots"></span><span class="val">' +
-    fromCents(d.cents).toFixed(2) + '</span></div>';
 
   const paidRows = v.moved ? S.people.map((p) => soft('paid by ' + esc(p.name), v.paid[p.id] || 0)).join('') : '';
   const backRows = v.anyBack ? '<div class="tear"></div>' + S.people.map((p) =>
     soft('paid back by ' + esc(p.name), v.back[p.id] || 0)).join('') : '';
 
-  /* The month as a subtotal: what these weeks alone left between you, in the
-     same rows the figures above it use. Whoever the month leaves short is not
-     necessarily whoever the ledger does — that is the next line's job to say. */
-  const month = !v.month ? '' :
-    '<div class="receipt-title" style="margin-bottom:6px">' + esc(monthLabel(v.month)) + ' on its own</div>' +
-    (v.monthDebts.length
-      ? v.monthDebts.map(owes).join('')
-      : '<div class="hint center" style="margin:0">Square this month.</div>') +
-    (v.opposed
-      ? '<div class="hint center" style="margin:6px 0 0">The months before it run the other way, and outweigh it.</div>'
-      : v.cancelled
-        ? '<div class="hint center" style="margin:6px 0 0">The other months make up for it exactly, so nothing is owed overall.</div>'
-        : '') +
-    '<div class="tear"></div>';
-
-  /* The headline: the debt that outlives the month, and the one the button
-     under it settles. */
+  /* The figure, named by the weeks it describes. A month's is a subtotal and
+     says so — "September 2026" under it, never "everything so far" — because
+     the one thing this card must never do again is let a slice be mistaken
+     for the debt. */
   const body = debts.length ? debts.map((d) => {
     const a = person(d.from), b = person(d.to);
-    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div><div class="sub">everything so far</div></div>' +
+    return '<div class="debt">' + avatar(a, 'lg') + '<div><div style="font-weight:800">' + esc(a?.name) + ' owes ' + esc(b?.name) + '</div>' +
+      '<div class="sub">' + esc(whole ? 'everything so far' : monthLabel(mk as MonthKey)) + '</div></div>' +
       '<span class="amt">' + money(fromCents(d.cents), baseCur()) + '</span></div>';
-  }).join('') : '<div class="stamp">ALL SQUARE ✨</div>';
+  }).join('') : '<div class="stamp">' + (whole ? 'ALL SQUARE ✨' : 'SQUARE THIS MONTH ✨') + '</div>';
+
+  /* Monthly never settles: a repayment pays off a ledger, not a slice of one,
+     and the button that does it is one tap away on the tab that owns the
+     figure. The link is navigation, not a second answer — it carries no
+     number, which is the whole point of having split them. */
+  const foot = whole
+    ? (debts.length ? '<button class="btn mint wide" style="margin-top:8px" data-act="settle">Settle up 🤝</button>' : '')
+    : '<button class="today-link" style="margin:8px 0 0;width:100%" data-act="scope" data-v="all">where you stand overall ›</button>';
 
   return '<div class="receipt" style="padding-top:22px">' +
     '<div class="receipt-title">the tally · ' + esc(baseCur()) + '</div>' +
     (l.kind === 'trip' ? '' : '<div class="sub center" style="margin:-8px 0 12px">' +
-      (v.month ? 'This month on its own, then where you stand' : 'Every month together, whenever the money moved') + '</div>') +
-    paidRows + backRows + (paidRows || backRows ? '<div class="tear"></div>' : '') + month + body +
-    '<button class="today-link" style="margin:14px 0 0;width:100%" data-act="tally">see who paid what ›</button>' +
-    (debts.length ? '<button class="btn mint wide" style="margin-top:8px" data-act="settle">Settle up 🤝</button>' : '') +
+      (whole ? 'Every month together, whenever the money moved' : 'This month on its own') + '</div>') +
+    paidRows + backRows + (paidRows || backRows ? '<div class="tear"></div>' : '') + body +
+    '<button class="today-link" style="margin:14px 0 0;width:100%" data-act="tally" data-v="' + (whole ? 'all' : 'month') + '">see who paid what ›</button>' +
+    foot +
     '</div>';
+}
+
+/** What a scope's spend is made of — the same three boxes on either tab. */
+function splitRow(v: SpentView): string {
+  const cells: [string, number, string][] = [
+    ['recurring', v.totals.recurring, ''], ['extras', v.totals.oneOff, ''],
+  ];
+  if (v.totals.planned) cells.push(['planned', v.totals.planned, ' plan']);
+  return '<div class="split">' + cells.map(([k, c, cls]) =>
+    '<div class="sp' + cls + '"><div class="k">' + k + '</div><div class="v">' + fromCents(c).toFixed(2) + '</div></div>').join('') + '</div>';
 }
 
 /* ---------- the month ---------- */
@@ -193,10 +190,10 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
  * split under it is the same recurring / extras / planned numbers the strip
  * carried, without a box drawn round each one.
  *
- * A solo book has no tally to hold the whole-ledger view, so the card carries
- * it as a tail — but only when the ledger is wider than the month on screen.
- * With a single month of entries the two are the same number, and printing it
- * twice was the complaint that started all this.
+ * It used to grow an all-time tail on a solo book, which had no tally card to
+ * hold the whole-ledger view. The Total tab holds it now, for solo and shared
+ * alike — so this card is the month and only the month, which is the same
+ * rule the tally beside it follows.
  */
 function monthCard(l: Ledger, mk: MonthKey, v: SpentView): string {
   const soloBook = solo();
@@ -214,33 +211,16 @@ function monthCard(l: Ledger, mk: MonthKey, v: SpentView): string {
     return shell(title + '<div class="empty"><span class="big">🐷</span>Nothing spent yet.<br>Tap ＋ Add and this is where it adds up.</div>');
   }
 
-  const cells: [string, number, string][] = [
-    ['recurring', v.totals.recurring, ''], ['extras', v.totals.oneOff, ''],
-  ];
-  if (v.totals.planned) cells.push(['planned', v.totals.planned, ' plan']);
-  const split = '<div class="split">' + cells.map(([k, c, cls]) =>
-    '<div class="sp' + cls + '"><div class="k">' + k + '</div><div class="v">' + fromCents(c).toFixed(2) + '</div></div>').join('') + '</div>';
+  const split = splitRow(v);
 
-  /* Whether this month is a dear one — the one thing the strip could never
-     say, and the reason the solo tail is worth its rows at all. */
-  let tail = '';
-  if (soloBook && sum.total !== paid) {
-    const d = sum.month - sum.perMonth;
-    const note = sum.span < 2 ? ''
-      : Math.abs(d) < 100 ? 'Bang on a usual month.'
-      : money(fromCents(Math.abs(d)), baseCur()) + (d > 0 ? ' more' : ' less') + ' than a usual month.';
-    /* The month it all started in reads as a sentence, not as a row label:
-       a dotted row is one line, and "since January 2025" wrapped it onto a
-       second with the figure stranded up on the first. */
-    const since = sum.since && sum.since !== mk ? 'Since ' + monthLabel(sum.since) + '.' : '';
-    const foot = [since, note].filter(Boolean).join(' ');
-    const row = (k: string, v: string): string =>
-      '<div class="rrow"><span>' + k + '</span><span class="dots"></span><span class="val">' + v + '</span></div>';
-    tail = '<div class="tear"></div>' +
-      (sum.span > 1 ? row('a usual month', fromCents(sum.perMonth).toFixed(2)) : '') +
-      row('all time · ' + sum.count + ' entr' + (sum.count === 1 ? 'y' : 'ies'), fromCents(sum.total).toFixed(2)) +
-      (foot ? '<div class="hint center" style="margin-top:10px">' + esc(foot) + '</div>' : '');
-  }
+  /* Whether this month is a dear one. It is the one all-time fact that says
+     something about *this* month rather than about the book, so it stays —
+     as a sentence, with no second figure to weigh against the one above. */
+  const d = sum.month - sum.perMonth;
+  const tail = sum.span < 2 || sum.total === paid ? ''
+    : '<div class="hint center" style="margin-top:12px">' + esc(Math.abs(d) < 100
+      ? 'Bang on a usual month.'
+      : money(fromCents(Math.abs(d)), baseCur()) + (d > 0 ? ' more' : ' less') + ' than a usual month.') + '</div>';
   return shell(title + '<div class="figure">' + fromCents(paid).toFixed(2) + '</div>' + split + tail);
 }
 
@@ -297,7 +277,7 @@ function repaymentsCard(l: Ledger, mk: MonthKey | null): string {
     (list.length
       ? rows + (v.perPair.length > 1 ? '<div class="divider"></div>' + summary : '')
       : '<div class="empty"><span class="big">💸</span>' +
-        (mk ? 'Nothing repaid for ' + esc(monthLabel(mk)) + '.<br>The running total in the tally above spans every month.'
+        (mk ? 'Nothing repaid for ' + esc(monthLabel(mk)) + '.<br>A repayment shows here once it is ticked against one of this month\'s items.'
           : 'No money has moved yet.<br>The tally above says who should pay whom.') + '</div>') +
     '<button class="btn soft wide" style="margin-top:12px" data-act="new-settle">＋ Log a repayment</button></div>';
 }
@@ -358,8 +338,64 @@ function plannedCard(v: SpentView): string {
 }
 
 /* ---------- household ---------- */
+/**
+ * A household ledger has two tabs, and the split is the whole point: each one
+ * answers one question and never the other's.
+ *
+ * Monthly is these weeks and nothing else — what they cost, what was ticked
+ * against them, what they left between you. Total is every month at once —
+ * what the book has cost since it started, the debt that actually stands, and
+ * the button that settles it. They used to be one page, and the tally card on
+ * it printed a month's subtotal directly above a running total that could
+ * contradict it. Two right answers to one question is a wrong page.
+ */
 function householdView(l: Ledger): string {
-  const mk = UI.month;
+  const tab = (v: Scope, label: string): string =>
+    '<button class="chip ' + (UI.scope === v ? 'on' : '') + '" data-act="scope" data-v="' + v + '">' +
+    '<span class="tick">' + (UI.scope === v ? '✓' : '') + '</span>' + label + '</button>';
+  const tabs = '<div class="chips scopetabs">' + tab('month', '📅 Monthly') + tab('all', '🧮 Total') + '</div>';
+  return tabs + (UI.scope === 'all' ? totalView(l) : monthView(l, UI.month));
+}
+
+/** Every month together: what the book has cost, and where it leaves you. */
+function totalView(l: Ledger): string {
+  const v = spentView(S, l.id, null);
+  let out = totalCard(v);
+  if (!solo()) out += receiptCard(l, null);
+  out += plannedCard(v);
+  /* The whole log, grouped by the month each repayment was filed under —
+     `repaymentsView` already heads the groups when there is more than one. */
+  if (!solo()) out += repaymentsCard(l, null);
+  out += catCard(v);
+  return out;
+}
+
+/**
+ * What the book has cost since it started, in the shape the month card uses —
+ * the same figure, the same recurring/extras split, so moving between the tabs
+ * moves one number rather than re-teaching a layout.
+ */
+function totalCard(v: SpentView): string {
+  const sum = v.summary;
+  const title = '<div class="receipt-title">spent in all · ' + esc(baseCur()) + '</div>';
+  const shell = (body: string): string =>
+    '<div class="' + (solo() ? 'receipt' : 'card') + ' monthcard">' + body + '</div>';
+  if (!sum.count && !sum.planned) {
+    return shell(title + '<div class="empty"><span class="big">🐷</span>Nothing spent yet.<br>Tap ＋ Add and this is where it adds up.</div>');
+  }
+  const row = (k: string, val: string): string =>
+    '<div class="rrow"><span>' + k + '</span><span class="dots"></span><span class="val">' + val + '</span></div>';
+  /* A usual month is what the total can say and a month never could — and it
+     only means anything once there are two of them to average. */
+  const tail = '<div class="tear"></div>' +
+    (sum.span > 1 ? row('a usual month', fromCents(sum.perMonth).toFixed(2)) : '') +
+    row(sum.count + ' entr' + (sum.count === 1 ? 'y' : 'ies') +
+      (sum.since ? ' since ' + monthLabel(sum.since) : ''), fromCents(sum.total).toFixed(2));
+  return shell(title + '<div class="figure">' + fromCents(v.totals.spent).toFixed(2) + '</div>' + splitRow(v) + tail);
+}
+
+/** One month: what it cost, what was ticked against it, what it left. */
+function monthView(l: Ledger, mk: MonthKey): string {
   const v = spentView(S, l.id, mk);
   const recs = v.recurring;
   const ad = v.oneOff;

@@ -254,7 +254,10 @@ export function saveExpense(id?: string): void {
   } else {
     S.expenses.push(Object.assign({ id: uid('exp_'), createdAt: new Date().toISOString() }, data));
   }
-  if (!id && monthOf(data.date) !== UI.month && l.kind !== 'trip') UI.month = monthOf(data.date);
+  /* Land where the entry actually shows: its own month, on the tab that
+     lists months. Adding from Total used to close onto a page with no list
+     on it — the figure moved and nothing else did. */
+  if (!id && l.kind !== 'trip') { UI.month = monthOf(data.date); UI.scope = 'month'; }
   closeModal(); commit(); toast(id ? 'Saved' : 'Added ' + shortName(name));
 }
 const shortName = (n: string): string => (n.length > 18 ? n.slice(0, 18) + '…' : n);
@@ -512,12 +515,12 @@ export function tallyModal(scope?: string): void {
       '<div class="figure-cap"><b>' + esc(person(d.from)?.name) + '</b> owes <b>' + esc(person(d.to)?.name) + '</b> · ' +
       esc(whole ? 'everything so far' : monthLabel(UI.month)) + '</div>').join('')
     : '<div class="stamp">' + (whole ? 'ALL SQUARE ✨' : 'SQUARE THIS MONTH ✨') + '</div>';
-  /* A month can close on a debt the ledger hasn't got. The caption above names
-     the month, but the reader came here from a card stamped ALL SQUARE, so the
-     sum has to finish the sentence rather than leave the two to be reconciled
-     by hand. */
+  /* A month can close on a debt the ledger hasn't got. This is the one place
+     that is worth saying, because it is the sum you opened to reconcile — and
+     it says it without a second figure, pointing at the tab that carries one
+     instead. */
   const absorbed = b.cancelled
-    ? '<div class="hint center" style="margin:10px 0 0">Other months run the other way and cover it, so nothing is owed overall.</div>'
+    ? '<div class="hint center" style="margin:10px 0 0">Other months run the other way and cover it — <b>Total</b> has where you actually stand.</div>'
     : '';
 
   openModal(head('Who paid what') +
@@ -786,6 +789,9 @@ export function saveSettlement(id?: string): void {
   }
   /* Land on a month that will actually show it: what it was ticked against
      decides that, and only its own date when nothing was. */
+  /* A repayment reads on either tab — the month it was filed under, or the
+     running total it just moved — so logging one leaves you where you were
+     and only corrects the month under Monthly. */
   const months = settlementMonths(S, data);
   if (!id && l.kind !== 'trip' && !months.includes(UI.month)) UI.month = months[0];
   closeModal(); commit(); toast(id ? 'Saved' : 'Repayment logged 🤝');

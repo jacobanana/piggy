@@ -63,7 +63,7 @@ describe('tallyView', () => {
     const v = tallyView(overpaidBook(), 'home', '2025-07');
     expect(v.moved).toBe(false);
     expect(v.anyBack).toBe(false);
-    expect(v.monthDebts).toEqual([]);
+    expect(v.debts).toEqual([]);
     expect(v.back).toEqual({ lea: 0, marc: 0 });
   });
 
@@ -72,31 +72,38 @@ describe('tallyView', () => {
     expect(v.back.marc).toBe(80000);
     /* Marc owed 600 and handed over 800, so August alone leaves Léa owing him
        the 200 he overshot by. */
-    expect(v.monthDebts).toEqual([{ from: 'lea', to: 'marc', cents: 20000 }]);
-  });
-
-  it('reads the headline off the whole ledger, not the month', () => {
-    const v = tallyView(overpaidBook(), 'home', '2025-07');
     expect(v.debts).toEqual([{ from: 'lea', to: 'marc', cents: 20000 }]);
-    expect(v.monthDebts).toEqual([]);
   });
 
-  it('says so when the month runs against the ledger', () => {
+  it('leaves the ledger debt to the ledger scope', () => {
+    const s = overpaidBook();
+    /* The 800 was ticked against August, so July holds none of it and says
+       so. The 200 it overshot by is the ledger's to report, and only on the
+       scope that can settle it. */
+    expect(tallyView(s, 'home', '2025-07').debts).toEqual([]);
+    expect(tallyView(s, 'home', null).debts).toEqual([{ from: 'lea', to: 'marc', cents: 20000 }]);
+  });
+
+  it('answers with the month it was asked about, not the ledger', () => {
     const s = fixture();
     s.expenses = [
       expense({ id: 'e-jul', date: '2025-07-02', amount: 1000 }),   // Marc owes Léa 500
       expense({ id: 'e-aug', date: '2025-08-04', amount: 100, accountId: 'acc-marc' }),
     ];
-    /* August leaves Léa owing 50; the ledger still leaves Marc owing 450. */
-    expect(tallyView(s, 'home', '2025-08').opposed).toBe(true);
-    expect(tallyView(s, 'home', '2025-07').opposed).toBe(false);
+    /* August leaves Léa owing 50 and the ledger leaves Marc owing 450: the
+       two run opposite ways, which is exactly why they are two tabs. Each
+       call answers for its own scope and knows nothing of the other. */
+    expect(tallyView(s, 'home', '2025-08').debts).toEqual([{ from: 'lea', to: 'marc', cents: 5000 }]);
+    expect(tallyView(s, 'home', '2025-07').debts).toEqual([{ from: 'marc', to: 'lea', cents: 50000 }]);
+    expect(tallyView(s, 'home', null).debts).toEqual([{ from: 'marc', to: 'lea', cents: 45000 }]);
   });
 
   /**
    * The book behind "where does the 9.95 come from?": two months that mirror
    * each other exactly, so the ledger is square while each month on its own
-   * is not. The card used to print the month's debt with an ALL SQUARE stamp
-   * directly beneath it and nothing between the two.
+   * is not. One card printed both, and the month's debt sat directly above an
+   * ALL SQUARE stamp. Now Monthly prints the month and Total prints the
+   * stamp, and neither is on screen with the other.
    */
   function mirroredBook(): AppState {
     const s = fixture();
@@ -110,44 +117,40 @@ describe('tallyView', () => {
     return s;
   }
 
-  it('says so when the month leaves a debt the ledger has not got', () => {
+  it('keeps a mirrored month and a square ledger in separate answers', () => {
+    const s = mirroredBook();
+    expect(tallyView(s, 'home', '2025-08').debts).toEqual([{ from: 'lea', to: 'marc', cents: 10000 }]);
+    expect(tallyView(s, 'home', '2025-09').debts).toEqual([{ from: 'marc', to: 'lea', cents: 10000 }]);
+    /* The one scope you can settle, and it owes nothing. */
+    expect(tallyView(s, 'home', null).debts).toEqual([]);
+  });
+
+  it('scopes the paid and paid-back rows to the same weeks as the balance', () => {
     const s = mirroredBook();
     const aug = tallyView(s, 'home', '2025-08');
-    expect(aug.debts).toEqual([]);
-    expect(aug.monthDebts).toEqual([{ from: 'lea', to: 'marc', cents: 10000 }]);
-    expect(aug.cancelled).toBe(true);
-    /* Nothing to be opposite to: the headline is a stamp, not a debt. */
-    expect(aug.opposed).toBe(false);
-
+    expect(aug.paid).toEqual({ lea: 100000, marc: 0 });
+    expect(aug.back).toEqual({ lea: 0, marc: 60000 });
     const sep = tallyView(s, 'home', '2025-09');
-    expect(sep.monthDebts).toEqual([{ from: 'marc', to: 'lea', cents: 10000 }]);
-    expect(sep.cancelled).toBe(true);
+    /* September bought nothing: only the 100 handed back lands in it. */
+    expect(sep.paid).toEqual({ lea: 0, marc: 0 });
+    expect(sep.back).toEqual({ lea: 10000, marc: 0 });
+    expect(sep.moved).toBe(true);
   });
 
-  it('leaves cancelled alone when the ledger still owes something', () => {
-    const s = fixture();
-    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04', amount: 1000 })];
-    expect(tallyView(s, 'home', '2025-08').cancelled).toBe(false);
-    /* A square month over a square ledger has no subtotal to explain. */
-    expect(tallyView(s, 'home', '2025-07').cancelled).toBe(false);
-  });
-
-  it('never calls a whole-ledger scope cancelled', () => {
-    expect(tallyView(mirroredBook(), 'home', null).cancelled).toBe(false);
-    expect(tallyBreakdown(mirroredBook(), 'home', null).cancelled).toBe(false);
-  });
-
-  it('hands the breakdown the same verdict as the card', () => {
+  it('still tells the breakdown when other months cover the one on screen', () => {
     const b = tallyBreakdown(mirroredBook(), 'home', '2025-08');
     expect(b.cancelled).toBe(true);
     expect(b.people.find((x) => x.id === 'marc')?.net).toBe(10000);
+    /* Never on the ledger scope: there is nothing outside it to do the
+       covering. */
+    expect(tallyBreakdown(mirroredBook(), 'home', null).cancelled).toBe(false);
   });
 
   it('sums the whole log for a scope with no month', () => {
     const s = overpaidBook();
     const v = tallyView(s, 'home', null);
     expect(v.back.marc).toBe(80000);
-    expect(v.monthBalances).toBe(null);
+    expect(v.month).toBe(null);
     expect(v.moved).toBe(true);
   });
 });
@@ -172,6 +175,27 @@ describe('repaymentsView', () => {
       { from: 'lea', to: 'marc', cents: 2000 },
       { from: 'marc', to: 'lea', cents: 8000 },
     ]);
+  });
+
+  it('heads the whole log with the month each repayment was filed under', () => {
+    const s = overpaidBook();
+    /* Handed over on 28 July, ticked against August's rent. The month tabs
+       count it in August, so the log has to head it August. */
+    const v = repaymentsView(s, 'home', null);
+    expect(v.groups.map((g) => g.month)).toEqual(['2025-08']);
+    expect(v.groups[0].list.map((x) => x.id)).toEqual(['s1']);
+  });
+
+  it('puts the newest month at the top of the whole log', () => {
+    const s = fixture();
+    s.rules = [rentRule({ startMonth: '2025-08', endMonth: '2025-10' })];
+    s.settlements = [
+      settlement({ id: 's-oct', date: '2025-09-20', itemIds: ['rule-rent|2025-10'] }),
+      settlement({ id: 's-aug', date: '2025-08-02', itemIds: ['rule-rent|2025-08'] }),
+      settlement({ id: 's-sep', date: '2025-08-30', itemIds: ['rule-rent|2025-09'] }),
+    ];
+    expect(repaymentsView(s, 'home', null).groups.map((g) => g.month))
+      .toEqual(['2025-10', '2025-09', '2025-08']);
   });
 
   it('groups a trip by the month the money moved, and a month not at all', () => {
@@ -300,7 +324,7 @@ describe('the figures agree with each other', () => {
         months.forEach((m) => {
           const v = tallyView(s, 'home', m);
           const b = tallyBreakdown(s, 'home', m);
-          b.people.forEach((x) => expect(x.net).toBe(v.monthBalances![x.id]));
+          b.people.forEach((x) => expect(x.net).toBe(v.balances[x.id]));
         });
       });
 
@@ -310,7 +334,7 @@ describe('the figures agree with each other', () => {
         const summed: Record<string, number> = { lea: 0, marc: 0 };
         months.forEach((m) => {
           const v = tallyView(s, 'home', m);
-          s.people.forEach((p) => { summed[p.id] += v.monthBalances![p.id]; });
+          s.people.forEach((p) => { summed[p.id] += v.balances[p.id]; });
         });
         expect(summed).toEqual(running);
       });
@@ -321,7 +345,7 @@ describe('the figures agree with each other', () => {
           const v = tallyView(s, 'home', m);
           const b = tallyBreakdown(s, 'home', m);
           const empty = !b.recurring.length && !b.oneOff.length && !b.repayments.length;
-          if (empty) expect(v.monthDebts).toEqual([]);
+          if (empty) expect(v.debts).toEqual([]);
         });
       });
     });
