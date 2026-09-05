@@ -57,6 +57,8 @@ The four pieces:
 
 - `frontend/src/domain/` — pure maths: splits, balances, recurrence, fx.
   Tested by Vitest. No DOM anywhere in this directory.
+  - `balances.ts` is the maths; `tally.ts` is the read model on top of it —
+    one call per card, returning the figures that card prints.
 - `frontend/src/app/` — rendering, modals, events; DOM allowed, maths not.
 - `src/identity/` — users, email codes, JWT. `src/manage.py` is the user CLI.
 - `src/ledger/` — the Book data model and the sync service.
@@ -104,6 +106,23 @@ shape.
 
 - Money maths happens in integer cents (`frontend/src/domain/`); rounding
   rules (who absorbs the leftover cent) are load-bearing and tested.
+- **The maths is in the frontend on purpose, and nothing in `app/` adds money
+  up.** It cannot move to the backend: the Pages build is the live product and
+  has no backend to call, and the installed PWA's service worker never touches
+  `api/`, so a server-computed tally would go blank on a plane. One
+  implementation serving both shapes beats a Python authority with a TypeScript
+  mirror — that is two implementations of one calculation, which is precisely
+  the bug class this rule exists to prevent. So a card asks `domain/tally.ts`
+  for a view and prints it; it never sums, converts or nets anything itself.
+  Adding a figure to a card means adding it to a view first. The tell that this
+  has slipped is a `cents(toBase(...))` reduce in `app/`.
+- **A repayment's money belongs to the months it was ticked against**, never to
+  the day it was handed over — including the part that overshoots what those
+  items still add up to. Tick a bill that is later deleted and the overshoot
+  stays in the month you paid *towards*. `settlementMonths` (the log) and
+  `settlementByMonth` (the tally) both read `namedMonths`, and they must: when
+  they drifted, a July with nothing in it printed a 113.30 debt beside a
+  111.80 headline, and the receipt disagreed with itself on screen.
 - Planned expenses stay out of every total that describes reality.
 - **A solo book has no who-paid fields.** `solo()` and `oneAccount()` in
   `app/context.ts` decide it: one person means no split editor, no tally, no

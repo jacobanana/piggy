@@ -183,14 +183,49 @@ describe('monthlyBalances', () => {
     expect(months[0].balances.marc).toBe(5000);
   });
 
-  it('lands the part of a repayment no item accounts for on its own date', () => {
+  it('keeps an overpayment in the month it was paid towards, not the month it moved', () => {
     const s = fixture();
     s.expenses = [expense({ id: 'e-jul', date: '2025-07-02' })];   // Marc owes 50
     s.settlements = [settlement({ date: '2025-09-01', amount: 80, itemIds: ['e-jul'] })];
     const months = monthlyBalances(s, 'home');
-    expect(months.map((t) => t.month)).toEqual(['2025-07', '2025-09']);
-    expect(months[0].back.marc).toBe(5000);
-    expect(months[1].back.marc).toBe(3000);
+    /* All 80 is July's money — the 30 it overshot by leaves Marc in credit on
+       July, and September never saw it. It used to land on September, which
+       gave that month a debt out of nothing and a paid-back figure its own
+       repayment list did not carry. */
+    expect(months.map((t) => t.month)).toEqual(['2025-07']);
+    expect(months[0].back.marc).toBe(8000);
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('keeps the whole of a repayment on the month it named when a bill it ticked is gone', () => {
+    const s = fixture();
+    /* Marc hands over 800 for August's rent and one other August bill; the
+       other bill is deleted afterwards. The 200 it now overshoots by is still
+       August's money, and July — the month it happened to be paid in — stays
+       out of it entirely. */
+    s.rules = [{ ...rentRule(), startMonth: '2025-08', endMonth: '2025-08' }];
+    s.settlements = [settlement({
+      date: '2025-07-28', amount: 800,
+      itemIds: ['rule-rent|2025-08', 'rule-gone|2025-08'],
+    })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-08']);
+    expect(months[0].back.marc).toBe(80000);
+    expect(summed(s)).toEqual(computeBalances(s, 'home'));
+  });
+
+  it('spreads an overpayment across the named months in proportion', () => {
+    const s = fixture();
+    s.expenses = [
+      expense({ id: 'e-jul', date: '2025-07-02' }),                // Marc owes 50
+      expense({ id: 'e-aug', date: '2025-08-04', amount: 300 }),   // Marc owes 150
+    ];
+    s.settlements = [settlement({ date: '2025-09-01', amount: 400, itemIds: ['e-jul', 'e-aug'] })];
+    const months = monthlyBalances(s, 'home');
+    expect(months.map((t) => t.month)).toEqual(['2025-07', '2025-08']);
+    /* 200 covers both in full; the other 200 follows them 50:150. */
+    expect(months[0].back.marc).toBe(10000);
+    expect(months[1].back.marc).toBe(30000);
     expect(summed(s)).toEqual(computeBalances(s, 'home'));
   });
 
