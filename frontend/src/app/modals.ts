@@ -512,12 +512,19 @@ export function tallyModal(scope?: string): void {
       '<div class="figure-cap"><b>' + esc(person(d.from)?.name) + '</b> owes <b>' + esc(person(d.to)?.name) + '</b> · ' +
       esc(whole ? 'everything so far' : monthLabel(UI.month)) + '</div>').join('')
     : '<div class="stamp">' + (whole ? 'ALL SQUARE ✨' : 'SQUARE THIS MONTH ✨') + '</div>';
+  /* A month can close on a debt the ledger hasn't got. The caption above names
+     the month, but the reader came here from a card stamped ALL SQUARE, so the
+     sum has to finish the sentence rather than leave the two to be reconciled
+     by hand. */
+  const absorbed = b.cancelled
+    ? '<div class="hint center" style="margin:10px 0 0">Other months run the other way and cover it, so nothing is owed overall.</div>'
+    : '';
 
   openModal(head('Who paid what') +
     '<div class="sub" style="margin:-8px 0 12px">Everything behind the tally — the bills, the extras, and the money handed over.</div>' +
     chips + recurring + oneOff + repayments +
     '<div class="divider" style="margin-top:18px"></div>' +
-    '<div class="receipt-title">where that leaves you</div>' + maths + closer);
+    '<div class="receipt-title">where that leaves you</div>' + maths + closer + absorbed);
 }
 
 /** One person's figure out of the breakdown, by name of the column. */

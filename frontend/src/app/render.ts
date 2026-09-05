@@ -124,7 +124,11 @@ function renderNoLedger(): void {
  * figure Settle up hands the form — and the month is a subtotal above it,
  * named as such. When the two run opposite ways the card says so in a line,
  * rather than leaving the reader to work out that the receipt disagrees with
- * itself. A trip has no months, so it gets the running total alone.
+ * itself. It says so in the flatter case too: a ledger that is square while
+ * the month is not printed "Adrien owes Flavia 9.95" with an ALL SQUARE stamp
+ * immediately under it and nothing at all in between, which reads as the app
+ * being wrong rather than as two true figures at two scales. A trip has no
+ * months, so it gets the running total alone.
  */
 export function receiptCard(l: Ledger, mk: MonthKey | null): string {
   const v = tallyView(S, l.id, mk);
@@ -155,7 +159,9 @@ export function receiptCard(l: Ledger, mk: MonthKey | null): string {
       : '<div class="hint center" style="margin:0">Square this month.</div>') +
     (v.opposed
       ? '<div class="hint center" style="margin:6px 0 0">The months before it run the other way, and outweigh it.</div>'
-      : '') +
+      : v.cancelled
+        ? '<div class="hint center" style="margin:6px 0 0">The other months make up for it exactly, so nothing is owed overall.</div>'
+        : '') +
     '<div class="tear"></div>';
 
   /* The headline: the debt that outlives the month, and the one the button

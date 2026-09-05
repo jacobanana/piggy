@@ -41,8 +41,10 @@ function base(s: AppState, it: { amount: number; currency: string; fxRate?: numb
  *
  * Two figures, and they can point opposite ways — a month is a slice and the
  * debt is not. `debts` is the headline and the one Settle up hands the form;
- * `monthDebts` is the subtotal above it. `opposed` is true when the month runs
- * against the ledger, which is the one case the card has to say out loud.
+ * `monthDebts` is the subtotal above it. `opposed` and `cancelled` are the two
+ * ways they can disagree — the month running against a live debt, or against
+ * no debt at all — and both are cases the card has to say out loud, because a
+ * subtotal printed over a contradicting headline reads as an error in the app.
  */
 export interface TallyView {
   /** The month it covers, or null for the whole ledger (a trip). */
@@ -65,6 +67,12 @@ export interface TallyView {
   monthDebts: Debt[];
   /** The month and the ledger leave the same person on opposite sides. */
   opposed: boolean;
+  /**
+   * The month leaves somebody owing and the ledger is square: the other
+   * months absorb it, to the cent. `opposed` cannot also be true — it needs
+   * a debt on both sides, and here there is none to be opposite to.
+   */
+  cancelled: boolean;
 }
 
 export function tallyView(s: AppState, ledgerId: string, monthKey: MonthKey | null): TallyView {
@@ -84,17 +92,21 @@ export function tallyView(s: AppState, ledgerId: string, monthKey: MonthKey | nu
     return Math.abs(m) > 1 && Math.abs(r) > 1 && (m > 0) !== (r > 0);
   });
 
+  const debts = simplifyDebts(balances);
+  const monthDebts = t ? simplifyDebts(t.balances) : [];
+
   return {
     month: monthKey,
     balances,
-    debts: simplifyDebts(balances),
+    debts,
     paid,
     back,
     moved: t ? monthMoved(t) : true,
     anyBack: s.people.some((p) => (back[p.id] || 0) !== 0),
     monthBalances: t ? t.balances : null,
-    monthDebts: t ? simplifyDebts(t.balances) : [],
+    monthDebts,
     opposed,
+    cancelled: monthDebts.length > 0 && debts.length === 0,
   };
 }
 

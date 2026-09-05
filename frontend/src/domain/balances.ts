@@ -457,6 +457,12 @@ export interface TallyBreakdown {
   people: PersonSplit[];
   /** What each group came to, all people together. */
   totals: { recurring: number; oneOff: number; repaid: number };
+  /**
+   * The scope leaves somebody owing and the ledger as a whole does not — the
+   * other months absorb it, to the cent. False for a whole-ledger scope,
+   * which is the ledger.
+   */
+  cancelled: boolean;
 }
 
 export function tallyBreakdown(s: AppState, ledgerId: string, monthKey: MonthKey | null): TallyBreakdown {
@@ -521,6 +527,8 @@ export function tallyBreakdown(s: AppState, ledgerId: string, monthKey: MonthKey
       oneOff: oneOff.reduce((sum, it) => sum + base(it), 0),
       repaid: repayments.reduce((sum, x) => sum + (counted[x.id] || 0), 0),
     },
+    cancelled: !!monthKey && simplifyDebts(net).length > 0
+      && simplifyDebts(computeBalances(s, ledgerId)).length === 0,
   };
 }
 

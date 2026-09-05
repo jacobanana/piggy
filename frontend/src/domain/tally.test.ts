@@ -92,6 +92,57 @@ describe('tallyView', () => {
     expect(tallyView(s, 'home', '2025-07').opposed).toBe(false);
   });
 
+  /**
+   * The book behind "where does the 9.95 come from?": two months that mirror
+   * each other exactly, so the ledger is square while each month on its own
+   * is not. The card used to print the month's debt with an ALL SQUARE stamp
+   * directly beneath it and nothing between the two.
+   */
+  function mirroredBook(): AppState {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04', amount: 1000 })];
+    /* Marc owes 500 for August and hands over 600, ticked against it — so
+       August leaves Léa 100 behind and September gives it straight back. */
+    s.settlements = [
+      settlement({ id: 's-aug', date: '2025-08-10', amount: 600, itemIds: ['e-aug'] }),
+      settlement({ id: 's-sep', date: '2025-09-10', amount: 100, fromPersonId: 'lea', toPersonId: 'marc' }),
+    ];
+    return s;
+  }
+
+  it('says so when the month leaves a debt the ledger has not got', () => {
+    const s = mirroredBook();
+    const aug = tallyView(s, 'home', '2025-08');
+    expect(aug.debts).toEqual([]);
+    expect(aug.monthDebts).toEqual([{ from: 'lea', to: 'marc', cents: 10000 }]);
+    expect(aug.cancelled).toBe(true);
+    /* Nothing to be opposite to: the headline is a stamp, not a debt. */
+    expect(aug.opposed).toBe(false);
+
+    const sep = tallyView(s, 'home', '2025-09');
+    expect(sep.monthDebts).toEqual([{ from: 'marc', to: 'lea', cents: 10000 }]);
+    expect(sep.cancelled).toBe(true);
+  });
+
+  it('leaves cancelled alone when the ledger still owes something', () => {
+    const s = fixture();
+    s.expenses = [expense({ id: 'e-aug', date: '2025-08-04', amount: 1000 })];
+    expect(tallyView(s, 'home', '2025-08').cancelled).toBe(false);
+    /* A square month over a square ledger has no subtotal to explain. */
+    expect(tallyView(s, 'home', '2025-07').cancelled).toBe(false);
+  });
+
+  it('never calls a whole-ledger scope cancelled', () => {
+    expect(tallyView(mirroredBook(), 'home', null).cancelled).toBe(false);
+    expect(tallyBreakdown(mirroredBook(), 'home', null).cancelled).toBe(false);
+  });
+
+  it('hands the breakdown the same verdict as the card', () => {
+    const b = tallyBreakdown(mirroredBook(), 'home', '2025-08');
+    expect(b.cancelled).toBe(true);
+    expect(b.people.find((x) => x.id === 'marc')?.net).toBe(10000);
+  });
+
   it('sums the whole log for a scope with no month', () => {
     const s = overpaidBook();
     const v = tallyView(s, 'home', null);
