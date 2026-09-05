@@ -1,6 +1,6 @@
 /** Modal forms and their save handlers. Transient form state lives in F. */
 import type { Account, Expense, Ledger, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
-import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, toBase, accountEmoji, accountLabel } from './context';
+import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
 import { faceForName, myPersonId, onServer, profile, session, syncBookName } from './session';
@@ -8,8 +8,9 @@ import { DEFAULT_FACE, updateProfile } from '../storage/api';
 import { repaintIfOwed } from './sync';
 import { lockSection } from './lock';
 import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_LABEL, PAY_METHODS, THEMES } from '../lib/constants';
-import { $, cents, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, repaymentPicks, rollUpRecurring, settlementMonths, simplifyDebts, tallyBreakdown } from '../domain/balances';
+import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
+import { repaymentPicks, rollUpRecurring, settlementMonths, simplifyDebts, tallyBreakdown } from '../domain/balances';
+import { tallyView } from '../domain/tally';
 import type { PersonSplit, RepayPick, TallyBreakdown } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
 import { defaultAccountId, overrideOf } from '../domain/selectors';
@@ -471,7 +472,7 @@ export function tallyModal(scope?: string): void {
   /* A repayment is money between two people, so the row names both and the
      figure sits under whoever handed it over. */
   const moved = b.repayments.map((x) => {
-    const full = cents(toBase(x.amount, x.currency, x.fxRate));
+    const full = b.full[x.id] || 0;
     const c = b.counted[x.id] || 0;
     return '<tr class="tap" data-act="open-settle" data-id="' + x.id + '">' +
       label(esc((person(x.fromPersonId)?.name || '?') + ' → ' + (person(x.toPersonId)?.name || '?')),
@@ -528,7 +529,9 @@ function cell1(b: TallyBreakdown, id: string, key: 'recurring' | 'oneOff' | 'out
 /* ---------- settle up ---------- */
 export function settleModal(): void {
   const l = activeLedger()!;
-  const debts = simplifyDebts(computeBalances(S, l.id));
+  /* The same list the tally card prints, off the same call: the button under
+     a figure has to settle that figure. */
+  const debts = tallyView(S, l.id, null).debts;
   /* One debt per card, with its two answers welded to the bottom of it — the
      same shape the switcher uses for a piggy bank. They were four things loose
      in a dashed box before, and on a phone the buttons wrapped onto their own

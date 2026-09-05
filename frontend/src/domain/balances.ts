@@ -112,8 +112,32 @@ export function computeBalances(s: AppState, ledgerId: string): Record<string, n
   return bal;
 }
 
+/** One person owing another, in base-currency cents. */
+export interface Debt { from: string; to: string; cents: number }
+
+/**
+ * Divide `total` cents between weighted claims, exactly.
+ *
+ * Flooring each share loses up to a cent apiece; the biggest claims take them
+ * back, the same "someone has to absorb the leftover" rule the splits follow.
+ * Returned in the order the weights came in. With nothing to weigh by — every
+ * weight zero — it splits evenly, so a figure never vanishes for want of a
+ * denominator.
+ */
+function apportion(total: number, weights: number[]): number[] {
+  if (!weights.length || total <= 0) return weights.map(() => 0);
+  const w = weights.some((x) => x > 0) ? weights.map((x) => Math.max(0, x)) : weights.map(() => 1);
+  const tw = w.reduce((a, b) => a + b, 0);
+  const out = w.map((x) => Math.floor((total * x) / tw));
+  let left = total - out.reduce((a, b) => a + b, 0);
+  w.map((_, i) => i)
+    .sort((a, b) => w[b] - w[a])
+    .forEach((i) => { if (left > 0 && w[i] > 0) { out[i]++; left--; } });
+  return out;
+}
+
 /** Fewest transfers that clear the balances. Sub-cent noise is ignored. */
-export function simplifyDebts(bal: Record<string, number>): { from: string; to: string; cents: number }[] {
+export function simplifyDebts(bal: Record<string, number>): Debt[] {
   const cred: [string, number][] = [];
   const deb: [string, number][] = [];
   Object.entries(bal).forEach(([id, c]) => {
@@ -122,7 +146,7 @@ export function simplifyDebts(bal: Record<string, number>): { from: string; to: 
   });
   cred.sort((a, b) => b[1] - a[1]);
   deb.sort((a, b) => b[1] - a[1]);
-  const out: { from: string; to: string; cents: number }[] = [];
+  const out: Debt[] = [];
   let i = 0, j = 0;
   while (i < deb.length && j < cred.length) {
     const amt = Math.min(deb[i][1], cred[j][1]);
@@ -147,6 +171,19 @@ export function paidByTotals(s: AppState, ledgerId: string): Record<string, numb
   return out;
 }
 
+/** Base-currency cents each person has handed back in repayments, all told. */
+export function paidBackTotals(s: AppState, ledgerId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  s.people.forEach((p) => { out[p.id] = 0; });
+  s.settlements
+    .filter((x) => x.ledgerId === ledgerId)
+    .forEach((x) => {
+      const c = cents(toBase(s.settings.rates, x.amount, x.currency, x.fxRate));
+      if (out[x.fromPersonId] != null) out[x.fromPersonId] += c;
+    });
+  return out;
+}
+
 /** Every repayment in the ledger, newest first — one list, not one a month. */
 export function settlementsFor(s: AppState, ledgerId: string): Settlement[] {
   return s.settlements
@@ -168,6 +205,24 @@ function itemMonth(s: AppState, id: string): MonthKey | null {
 }
 
 /**
+ * The months a repayment names, oldest first — read off the ticked ids alone,
+ * before a cent of it is divided up. Empty when it ticked nothing, or when
+ * nothing it ticked can still be dated.
+ *
+ * A recurring occurrence carries its period in its own id, so a bill deleted
+ * since still says which month it was for; a deleted expense does not, and
+ * drops out.
+ */
+function namedMonths(s: AppState, x: { itemIds?: string[] }): MonthKey[] {
+  const out: MonthKey[] = [];
+  (x.itemIds || []).forEach((id) => {
+    const m = itemMonth(s, id);
+    if (m && !out.includes(m)) out.push(m);
+  });
+  return out.sort();
+}
+
+/**
  * The month (or months) a repayment belongs to for the log.
  *
  * Ticking what a repayment covers says which month's money it is, whatever
@@ -177,12 +232,8 @@ function itemMonth(s: AppState, id: string): MonthKey | null {
  * logged against has since been deleted.
  */
 export function settlementMonths(s: AppState, x: Pick<Settlement, 'date'> & { itemIds?: string[] }): MonthKey[] {
-  const out: MonthKey[] = [];
-  (x.itemIds || []).forEach((id) => {
-    const m = itemMonth(s, id);
-    if (m && !out.includes(m)) out.push(m);
-  });
-  return out.length ? out.sort() : [monthOf(x.date)];
+  const named = namedMonths(s, x);
+  return named.length ? named : [monthOf(x.date)];
 }
 
 /**
@@ -223,14 +274,7 @@ function allocation(s: AppState, x: Settlement, byId: Map<string, LedgerItem>): 
     ids.forEach((id, i) => { out[id] = owed[i]; });
     return out;
   }
-  const share = owed.map((c) => Math.floor((paid * c) / total));
-  /* Flooring loses up to one cent per item; the biggest debts take them back,
-     the same "someone has to absorb the leftover" rule the splits follow. */
-  let left = paid - share.reduce((a, b) => a + b, 0);
-  owed
-    .map((_, i) => i)
-    .sort((a, b) => owed[b] - owed[a])
-    .forEach((i) => { if (left > 0 && share[i] < owed[i]) { share[i]++; left--; } });
+  const share = apportion(paid, owed);
   ids.forEach((id, i) => { out[id] = share[i]; });
   return out;
 }
@@ -251,27 +295,43 @@ export interface MonthTally {
  *
  * The ticked items decide it, each taking the share `allocation` gave it and
  * filing it under its own month — half of July's rent is July's money whenever
- * it was handed over. Whatever is left over is money no item accounts for: a
- * repayment with nothing ticked, the part of one that overshot what it named,
- * or a share that was ticked against an entry since deleted. That has only the
- * date to go on, so it belongs to the month the money moved — the same
- * fallback `settlementMonths` uses for the log.
+ * it was handed over.
+ *
+ * What is left over is money no surviving item accounts for: the part of a
+ * repayment that overshot what it named, or a share ticked against an entry
+ * since deleted. It still belongs to the months the repayment *named* —
+ * handing someone 1600 for August's bills is August's money even if one of the
+ * bills you ticked has since been deleted, and even if it came to more than
+ * the ones left add up to. Named several, it follows them in proportion to
+ * what already landed on each. Only a repayment that names no datable month at
+ * all — nothing ticked, or nothing ticked that survives — has just the date to
+ * go on, and falls back to the month the money moved.
+ *
+ * That fallback is `settlementMonths`' own, and the months here are always
+ * among the ones it lists: the log and the tally cannot file the same cent
+ * under different months, which is exactly what they used to do.
  */
-function settlementByMonth(
+export function settlementByMonth(
   s: AppState,
   x: Settlement,
-  byId: Map<string, LedgerItem>,
+  byId?: Map<string, LedgerItem>,
 ): Record<MonthKey, number> {
+  const items = byId || new Map(repayableItems(s, x.ledgerId).map((it) => [it.id, it]));
   const out: Record<MonthKey, number> = {};
   const add = (m: MonthKey, c: number): void => { out[m] = (out[m] || 0) + c; };
   let left = cents(toBase(s.settings.rates, x.amount, x.currency, x.fxRate));
-  Object.entries(allocation(s, x, byId)).forEach(([id, c]) => {
+  Object.entries(allocation(s, x, items)).forEach(([id, c]) => {
     const m = itemMonth(s, id);
     if (!m || c <= 0) return;
     add(m, c);
     left -= c;
   });
-  if (left > 0) add(monthOf(x.date), left);
+  if (left <= 0) return out;
+
+  const targets = settlementMonths(s, x);
+  apportion(left, targets.map((m) => out[m] || 0)).forEach((c, i) => {
+    if (c > 0) add(targets[i], c);
+  });
   return out;
 }
 
@@ -384,6 +444,9 @@ export interface TallyBreakdown {
    * row can say what it is worth here rather than quietly meaning less.
    */
   counted: Record<string, number>;
+  /** What each repayment came to in all, by id — so a row that counts less
+      here than it was worth can say so without adding it up again itself. */
+  full: Record<string, number>;
   /**
    * What each person's accounts put into each entry, by item id then person —
    * one cell of the table. Whole cents, so a row adds up to the row and a
@@ -410,8 +473,10 @@ export function tallyBreakdown(s: AppState, ledgerId: string, monthKey: MonthKey
   const repayments = settlementsInMonth(s, ledgerId, monthKey);
   const byId = new Map(repayableItems(s, ledgerId).map((it) => [it.id, it]));
   const counted: Record<string, number> = {};
+  const full: Record<string, number> = {};
   repayments.forEach((x) => {
-    counted[x.id] = monthKey ? (settlementByMonth(s, x, byId)[monthKey] || 0) : base(x);
+    full[x.id] = base(x);
+    counted[x.id] = monthKey ? (settlementByMonth(s, x, byId)[monthKey] || 0) : full[x.id];
   });
 
   const zero = (): Record<string, number> => {
@@ -450,7 +515,7 @@ export function tallyBreakdown(s: AppState, ledgerId: string, monthKey: MonthKey
   });
 
   return {
-    month: monthKey, recurring, oneOff, repayments, counted, paidPerItem, people,
+    month: monthKey, recurring, oneOff, repayments, counted, full, paidPerItem, people,
     totals: {
       recurring: recurring.reduce((sum, it) => sum + base(it), 0),
       oneOff: oneOff.reduce((sum, it) => sum + base(it), 0),
