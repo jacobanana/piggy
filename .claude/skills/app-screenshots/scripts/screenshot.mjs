@@ -30,7 +30,7 @@ const HEIGHTS = { 390: 844, 768: 1024 };
 const DEFAULT_HEIGHT = 900;
 
 const args = process.argv.slice(2);
-const opt = { widths: [], clicks: [], seed: false, solo: false, empty: false, fullPage: false, name: 'shot', base: null };
+const opt = { widths: [], clicks: [], seed: false, solo: false, empty: false, fullPage: false, height: null, name: 'shot', base: null };
 for (let i = 0; i < args.length; i++) {
   switch (args[i]) {
     case '--seed': opt.seed = true; break;
@@ -38,6 +38,9 @@ for (let i = 0; i < args.length; i++) {
     case '--empty': opt.empty = true; break;
     case '--full-page': opt.fullPage = true; break;
     case '--width': opt.widths.push(args[++i]); break;
+    // A sheet is its own scroller (max-height:94vh), so --full-page photographs
+    // the page behind it. A tall viewport is what gets a whole modal in shot.
+    case '--height': opt.height = Number(args[++i]); break;
     case '--click': opt.clicks.push(args[++i]); break;
     case '--act': opt.clicks.push(`[data-act="${args[++i]}"]`); break;
     case '--name': opt.name = args[++i]; break;
@@ -143,7 +146,7 @@ const written = [];
 for (const w of opt.widths) {
   const width = WIDTHS[w] ?? Number(w);
   if (!width) { console.error(`bad width: ${w}`); continue; }
-  const height = HEIGHTS[width] ?? DEFAULT_HEIGHT;
+  const height = opt.height || HEIGHTS[width] || DEFAULT_HEIGHT;
   const page = await browser.newPage({ viewport: { width, height } });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   // Resource loads (fonts, CDNs) fail in sandboxes without being app bugs.

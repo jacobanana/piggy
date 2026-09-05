@@ -12,7 +12,8 @@ import { syncBookName } from './session';
 import { thisMonth } from '../lib/utils';
 import { rateOf as fxRateOf, toBase as fxToBase } from '../domain/fx';
 
-/** `month` scopes the expense lists only — the tally always spans the ledger. */
+/** `month` scopes the whole household view — the lists, and the tally with them.
+ *  Only the running total inside the tally still spans the ledger. */
 export interface UIState {
   ledgerId: string | null;
   month: string;

@@ -1,16 +1,16 @@
 /** Modal forms and their save handlers. Transient form state lives in F. */
 import type { Account, Expense, Ledger, Person, Rule, Settlement, Split, SplitMode } from '../model/types';
-import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, accountEmoji, accountLabel } from './context';
+import { S, UI, account, activeLedger, baseCur, ledger, oneAccount, person, rateOf, rule, solo, toBase, accountEmoji, accountLabel } from './context';
 import { COLORS } from './theme';
 import { avatar, commit } from './render';
 import { faceForName, myPersonId, onServer, profile, session, syncBookName } from './session';
 import { DEFAULT_FACE, updateProfile } from '../storage/api';
 import { repaintIfOwed } from './sync';
 import { lockSection } from './lock';
-import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_METHODS, THEMES } from '../lib/constants';
-import { $, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
-import { computeBalances, repaymentPicks, settlementMonths, simplifyDebts } from '../domain/balances';
-import type { RepayPick } from '../domain/balances';
+import { CATEGORIES, FREQS, FREQ_TAG, METHODS, PAY_LABEL, PAY_METHODS, THEMES } from '../lib/constants';
+import { $, cents, dayLabel, esc, fromCents, monthLabel, monthOf, r2, todayISO, uid } from '../lib/utils';
+import { computeBalances, repaymentPicks, rollUpRecurring, settlementMonths, simplifyDebts, tallyBreakdown } from '../domain/balances';
+import type { PersonSplit, RepayPick, TallyBreakdown } from '../domain/balances';
 import { occurrence } from '../domain/recurrence';
 import { defaultAccountId, overrideOf } from '../domain/selectors';
 
@@ -382,6 +382,147 @@ export function rulesModal(): void {
   openModal(head('Recurring bills') +
     '<div class="sub" style="margin:-8px 0 14px">Rent, insurance, quarterly water, yearly Spotify — anything that repeats.</div>' +
     body + '<button class="btn primary wide" style="margin-top:14px" data-act="new-rule">＋ New recurring bill</button>');
+}
+
+/* ---------- who paid what ---------- */
+/**
+ * The tally opened up: every entry behind the figure on the card, and what
+ * each of them did to each person.
+ *
+ * Set as a table rather than a list of cards, because the question it answers
+ * is arithmetic: one column per person, figures under each other, and a sum
+ * under a rule at the foot of each group. A card can hold one number and a
+ * name; a column can be added up by eye, which is the whole point of coming
+ * here — the last block does the same sum in the open, from what each person
+ * paid down to the balance the card printed.
+ *
+ * Recurring is worth its own group rather than a tag in a list of everything:
+ * a bill that lands every month is the part of a shared life nobody
+ * re-decides, and it is normally most of the total. Seeing it apart from the
+ * Tuesday groceries is the difference between "we spent a lot" and "we spent a
+ * lot on things we already agreed to".
+ *
+ * The scope follows the card that opened it — the month you were reading, with
+ * the whole ledger one chip away. A trip has no months, so it has no chips.
+ */
+export function tallyModal(scope?: string): void {
+  const l = activeLedger()!;
+  const whole = l.kind === 'trip' || scope === 'all';
+  const b = tallyBreakdown(S, l.id, whole ? null : UI.month);
+  const cash = (v: number): string => fromCents(v).toFixed(2);
+  /* An empty cell says nothing was put in — a 0.00 in every other column
+     reads as a figure you have to check rather than a gap you can skip. */
+  const cell = (v: number): string =>
+    '<td class="num">' + (v ? cash(v) : '<span class="nil">—</span>') + '</td>';
+  /* An entry names a thing and is set in bold; a step of the sum names an
+     operation and is not — the weight is what tells the two apart. */
+  const label = (what: string, note?: string): string =>
+    '<td><div class="what">' + what + '</div>' + (note ? '<div class="note">' + note + '</div>' : '') + '</td>';
+  const step = (what: string): string => '<td>' + what + '</td>';
+  const heads = '<thead><tr><th></th>' +
+    S.people.map((p) => '<th>' + esc(p.emoji + ' ' + p.name) + '</th>').join('') + '</tr></thead>';
+  const table = (rows: string): string =>
+    '<div class="tblwrap"><table class="tbl">' + heads + '<tbody>' + rows + '</tbody></table></div>';
+  const sum = (what: string, by: (id: string) => number): string =>
+    '<tr class="sum"><td>' + what + '</td>' + S.people.map((p) => cell(by(p.id))).join('') + '</tr>';
+
+  const chips = l.kind === 'trip' ? '' : '<div class="chips" style="margin:-4px 0 4px">' +
+    ([['month', monthLabel(UI.month)], ['all', 'Everything']] as [string, string][]).map(([v, name]) => {
+      const on = (v === 'all') === whole;
+      return '<button type="button" class="chip ' + (on ? 'on' : '') + '" data-act="tally-scope" data-v="' + v + '">' +
+        '<span class="tick">' + (on ? '✓' : '') + '</span>' + esc(name) + '</button>';
+    }).join('') + '</div>';
+
+  const section = (title: string, total: number, body: string, empty: string): string =>
+    '<div class="card-head" style="margin:18px 0 8px"><h2 style="font-size:16px">' + title + '</h2>' +
+    '<span class="sub">' + money2(fromCents(total), baseCur()) + '</span></div>' +
+    (body || '<div class="hint" style="margin:0">' + empty + '</div>');
+
+  /* Where the money came from, and when — the two things the columns can't
+     say. The original currency joins them when it isn't the book's own. */
+  const note = (it: { accountId: string; date: string; amount: number; currency: string }): string =>
+    [accountEmoji(it.accountId) + ' ' + esc(accountLabel(it.accountId)), esc(dayLabel(it.date)),
+      it.currency === baseCur() ? '' : esc(money2(it.amount, it.currency))].filter(Boolean).join(' · ');
+
+  const entries = (list: typeof b.recurring): string => list.map((it) =>
+    '<tr class="tap" data-act="open" data-kind="' + it.kind + '" data-id="' + it.id + '">' +
+    label(esc((it.emoji || '📦') + ' ' + it.name), note(it)) +
+    S.people.map((p) => cell(b.paidPerItem[it.id]?.[p.id] || 0)).join('') + '</tr>').join('');
+
+  /* Every occurrence, one to a line, is right for a month and a wall for a
+     ledger: the same three bills eighteen times over, above the figures that
+     actually answer the question. So the whole-ledger scope rolls them up per
+     bill — tapping one still opens the bill it names. */
+  const bills = (): string => rollUpRecurring(S, b.recurring).map((r) =>
+    '<tr class="tap" data-act="edit-rule" data-id="' + r.ruleId + '">' +
+    label(esc(r.emoji + ' ' + r.name),
+      accountEmoji(r.accountId) + ' ' + esc(accountLabel(r.accountId)) + ' · ' +
+      r.count + ' payments since ' + esc(monthLabel(r.from))) +
+    S.people.map((p) => cell(r.paid[p.id] || 0)).join('') + '</tr>').join('');
+
+  const where = whole ? 'so far' : 'in ' + monthLabel(UI.month);
+  const recurring = section('🔁 Recurring', b.totals.recurring,
+    b.recurring.length ? table((whole ? bills() : entries(b.recurring)) + sum('paid', (id) => cell1(b, id, 'recurring'))) : '',
+    'No recurring bills landed ' + esc(where) + '.');
+  const oneOff = section('🧾 One-off', b.totals.oneOff,
+    b.oneOff.length ? table(entries(b.oneOff) + sum('paid', (id) => cell1(b, id, 'oneOff'))) : '',
+    'Nothing extra ' + esc(where) + '.');
+
+  /* A repayment is money between two people, so the row names both and the
+     figure sits under whoever handed it over. */
+  const moved = b.repayments.map((x) => {
+    const full = cents(toBase(x.amount, x.currency, x.fxRate));
+    const c = b.counted[x.id] || 0;
+    return '<tr class="tap" data-act="open-settle" data-id="' + x.id + '">' +
+      label(esc((person(x.fromPersonId)?.name || '?') + ' → ' + (person(x.toPersonId)?.name || '?')),
+        [esc(dayLabel(x.date)), x.method ? esc(PAY_LABEL(x.method)) : '',
+          c === full ? '' : esc(money2(fromCents(full), baseCur()) + ' in all')].filter(Boolean).join(' · ')) +
+      S.people.map((p) => cell(p.id === x.fromPersonId ? c : 0)).join('') + '</tr>';
+  }).join('');
+  const repayments = section('🤝 Repayments', b.totals.repaid,
+    b.repayments.length ? table(moved + sum('paid back', (id) => cell1(b, id, 'out'))) : '',
+    'No money changed hands ' + esc(where) + '.');
+
+  /* And the sum in the open: what their money covered, what was actually
+     theirs, the money handed either way, and the figure the card printed. */
+  const op = (o: string, what: string): string => '<span class="op">' + o + '</span>' + what;
+  const line = (what: string, by: (x: PersonSplit) => number, cls?: string): string =>
+    '<tr' + (cls ? ' class="' + cls + '"' : '') + '>' + step(what) +
+    b.people.map((x) => cell(by(x))).join('') + '</tr>';
+  const signed = (v: number): string =>
+    '<td class="num' + (v ? '' : ' nil') + '">' + (v > 0 ? '+' : v < 0 ? '−' : '') + cash(Math.abs(v)) + '</td>';
+  const both = b.recurring.length > 0 && b.oneOff.length > 0;
+  const anyOut = b.people.some((x) => x.out || x.in);
+  const maths = '<div class="tblwrap"><table class="tbl">' + heads + '<tbody>' +
+    (b.recurring.length ? line('paid for the bills', (x) => x.recurring) : '') +
+    (b.oneOff.length ? line('paid for the extras', (x) => x.oneOff) : '') +
+    (both ? line(op('=', 'paid in all'), (x) => x.paid, 'sum') : '') +
+    line(op('−', 'their share of it'), (x) => x.share) +
+    (anyOut ? line(op('+', 'paid back'), (x) => x.out) : '') +
+    (anyOut ? line(op('−', 'handed to them'), (x) => x.in) : '') +
+    '<tr class="sum">' + step(op('=', 'where that leaves them')) +
+    b.people.map((x) => signed(x.net)).join('') + '</tr>' +
+    '</tbody></table></div>';
+
+  const debts = simplifyDebts(Object.fromEntries(b.people.map((x) => [x.id, x.net])));
+  const closer = debts.length
+    ? debts.map((d) => '<div class="figure" style="font-size:22px;margin-top:16px">' +
+      money2(fromCents(d.cents), baseCur()) + '</div>' +
+      '<div class="figure-cap"><b>' + esc(person(d.from)?.name) + '</b> owes <b>' + esc(person(d.to)?.name) + '</b> · ' +
+      esc(whole ? 'everything so far' : monthLabel(UI.month)) + '</div>').join('')
+    : '<div class="stamp">' + (whole ? 'ALL SQUARE ✨' : 'SQUARE THIS MONTH ✨') + '</div>';
+
+  openModal(head('Who paid what') +
+    '<div class="sub" style="margin:-8px 0 12px">Everything behind the tally — the bills, the extras, and the money handed over.</div>' +
+    chips + recurring + oneOff + repayments +
+    '<div class="divider" style="margin-top:18px"></div>' +
+    '<div class="receipt-title">where that leaves you</div>' + maths + closer);
+}
+
+/** One person's figure out of the breakdown, by name of the column. */
+function cell1(b: TallyBreakdown, id: string, key: 'recurring' | 'oneOff' | 'out'): number {
+  const x = b.people.find((p) => p.id === id);
+  return x ? x[key] : 0;
 }
 
 /* ---------- settle up ---------- */
